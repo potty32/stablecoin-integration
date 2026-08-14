@@ -1,0 +1,51 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      ssl: true
+      ssl-mode: require
+  jpa:
+    show-sql: false
+
+server:
+  ssl:
+    enabled: true
+    key-store: ${SSL_KEYSTORE_PATH:/etc/ssl/stablecoin/server.p12}
+    key-store-password: ${SSL_KEYSTORE_PASSWORD}
+    key-store-type: PKCS12
+    client-auth: need
+    trust-store: ${SSL_TRUSTSTORE_PATH:/etc/ssl/stablecoin/truststore.p12}
+    trust-store-password: ${SSL_TRUSTSTORE_PASSWORD}
+    trust-store-type: PKCS12
+    protocol: TLS
+    enabled-protocols: TLSv1.3
+
+app:
+  security:
+    jwt-secret: ${JWT_SECRET}
+    jwt-expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+    dev-mode: false
+    mtls-enabled: true
+
+circle:
+  api-key: ${CIRCLE_API_KEY}
+  base-url: ${CIRCLE_BASE_URL:https://api.circle.com}
+  wallet-id: ${CIRCLE_MASTER_WALLET_ID}
+
+taurus:
+  api-key: ${TAURUS_API_KEY}
+  base-url: ${TAURUS_BASE_URL}
+
+chainalysis:
+  api-key: ${CHAINALYSIS_API_KEY}
+  base-url: ${CHAINALYSIS_BASE_URL:https://api.chainalysis.com}
+
+n8n:
+  webhook-url: ${N8N_WEBHOOK_URL}
+
+core-banking:
+  base-url: ${CORE_BANKING_BASE_URL}
+  api-key: ${CORE_BANKING_API_KEY}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Spring-generierte Proxy-Klassen -->
+    <Match>
+        <Class name="~.*\$\$SpringCGLIB\$\$.*"/>
+    </Match>
+    <!-- Lombok-generierter Code (falls künftig genutzt) -->
+    <Match>
+        <Source name="~.*\.java"/>
+        <Bug category="STYLE"/>
+    </Match>
+    <!-- JPA-Entity-Felder ohne Initialisierung sind normal -->
+    <Match>
+        <Bug pattern="UWF_UNWRITTEN_FIELD"/>
+        <Class name="~de\.atruvia\.stablecoin\.entity\..*"/>
+    </Match>
+</FindBugsFilter>

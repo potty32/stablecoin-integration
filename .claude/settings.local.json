@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tmux list-sessions *)",
+      "Bash(screen -list)",
+      "Read(//home/kasm-user/**)"
+    ]
+  }
+}

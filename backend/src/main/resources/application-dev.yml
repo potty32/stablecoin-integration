@@ -1,0 +1,43 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/stablecoin_dev
+    username: stablecoin
+    password: stablecoin_dev_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 20
+      connection-timeout: 3000
+  jpa:
+    show-sql: false
+
+logging:
+  level:
+    de.atruvia.stablecoin: DEBUG
+    org.springframework.security: DEBUG
+
+app:
+  security:
+    jwt-secret: dev-secret-key-minimum-256-bits-for-hs256-algorithm-placeholder
+    jwt-expiration-ms: 86400000
+    dev-mode: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      circle-wallet:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      taurus-custody:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      core-banking:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      chainalysis:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s

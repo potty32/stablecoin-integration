@@ -1,0 +1,5 @@
+package de.atruvia.stablecoin.entity;
+
+public enum TransactionType {
+    OUTBOUND, INBOUND, BULK, P2P, REMITTANCE, YIELD_DEPOSIT
+}
