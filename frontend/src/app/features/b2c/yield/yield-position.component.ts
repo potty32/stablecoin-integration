@@ -1,13 +1,15 @@
 import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { TransactionService, YieldPositionResponse } from '../../../core/services/transaction.service';
+import { AuthService } from '../../../core/services/auth.service';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
 @Component({
   selector: 'app-yield-position',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   template: `
     <div style="max-width:560px">
       <h1 style="font-size:1.375rem;font-weight:700;margin-bottom:0.375rem">Sparkonto</h1>
@@ -54,10 +56,21 @@ type LoadState = 'loading' | 'loaded' | 'error';
         @if (showDepositConfirm) {
           <div style="margin-top:1rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1.25rem">
             <p style="font-size:0.875rem;color:#374151;margin-bottom:1rem">
-              Möchten Sie Ihr Sparkonto jetzt eröffnen? Die Einlage wird von Ihrem Referenzkonto belastet.
+              Wie viel möchten Sie anlegen? Die Einlage wird von Ihrem Referenzkonto belastet.
             </p>
+            <div style="margin-bottom:1rem">
+              <label style="display:block;font-size:0.8rem;font-weight:600;color:#374151;margin-bottom:0.375rem">Betrag (EUR)</label>
+              <input type="number" [(ngModel)]="depositAmount" min="1" step="0.01"
+                     placeholder="z.B. 1000"
+                     style="width:100%;box-sizing:border-box;padding:0.5rem 0.75rem;border:1px solid #e2e8f0;border-radius:6px;font-size:0.875rem">
+              @if (depositAmount && depositAmount > 0) {
+                <div style="font-size:0.75rem;color:#6b7280;margin-top:0.375rem">
+                  Tagesertrag bei 3,5% p.a.: ca. <strong>{{ (depositAmount * 0.035 / 365) | number:'1.2-2' }} EUR</strong>
+                </div>
+              }
+            </div>
             <div style="display:flex;gap:0.75rem">
-              <button (click)="submitDeposit()" [disabled]="depositSubmitting"
+              <button (click)="submitDeposit()" [disabled]="depositSubmitting || !depositAmount || depositAmount <= 0"
                       style="padding:0.625rem 1.25rem;background:#2563eb;color:white;border:none;border-radius:6px;font-weight:600;font-size:0.875rem;cursor:pointer">
                 {{ depositSubmitting ? 'Wird angelegt…' : 'Bestätigen' }}
               </button>
@@ -142,6 +155,7 @@ type LoadState = 'loading' | 'loaded' | 'error';
 })
 export class YieldPositionComponent implements OnInit {
   private txService = inject(TransactionService);
+  private auth = inject(AuthService);
 
   loadState: LoadState = 'loading';
   loadError: string | null = null;
@@ -150,6 +164,7 @@ export class YieldPositionComponent implements OnInit {
   depositSubmitting = false;
   depositError: string | null = null;
   showDepositConfirm = false;
+  depositAmount: number | null = null;
 
   redeemSubmitting = false;
   redeemError: string | null = null;
@@ -182,16 +197,19 @@ export class YieldPositionComponent implements OnInit {
   }
 
   openDeposit(): void {
+    this.depositAmount = null;
     this.showDepositConfirm = true;
   }
 
   submitDeposit(): void {
+    if (!this.depositAmount || this.depositAmount <= 0) return;
     this.depositSubmitting = true;
     this.depositError = null;
 
     const idempotencyKey = crypto.randomUUID();
+    const iban = this.auth.getIban();
 
-    this.txService.depositYield(idempotencyKey).subscribe({
+    this.txService.depositYield(idempotencyKey, iban, this.depositAmount).subscribe({
       next: (pos) => {
         this.depositSubmitting = false;
         this.showDepositConfirm = false;

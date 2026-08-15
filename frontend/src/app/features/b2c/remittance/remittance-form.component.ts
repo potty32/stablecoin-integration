@@ -3,6 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { TransactionService, RemittanceResponse } from '../../../core/services/transaction.service';
+import { AuthService } from '../../../core/services/auth.service';
 
 @Component({
   selector: 'app-remittance-form',
@@ -125,13 +126,14 @@ import { TransactionService, RemittanceResponse } from '../../../core/services/t
 export class RemittanceFormComponent {
   private fb = inject(FormBuilder);
   private txService = inject(TransactionService);
+  private auth = inject(AuthService);
 
   submitting = false;
   error: string | null = null;
   successData: RemittanceResponse | null = null;
 
   form = this.fb.group({
-    sourceIban: ['', Validators.required],
+    sourceIban: [this.auth.getIban(), Validators.required],
     recipientPhone: ['', [Validators.required, Validators.pattern(/^\+[1-9]\d{6,14}$/)]],
     amountEur: [null as number | null, [Validators.required, Validators.min(1)]],
     recipientCountry: ['', Validators.required],

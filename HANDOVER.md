@@ -105,7 +105,7 @@ C_Gas    = 0,008 EUR simuliert (L2 Polygon)
 | Phone-Alias Hashing | SHA-256 + Salt `"atruvia-stablecoin-2026"` |
 | Yield Rate | 3,5% p.a. (tägl. Zins: amountEur × 0.035 / 365) |
 | Micropayment Max | 10 EUR, biometricToken mind. 10 Zeichen |
-| High-Risk Test-Adresse | `0xHighRiskAddress000000000000000000000000` → HTTP 403 |
+| High-Risk Test-Adresse | `0xDEAD000000000000000000000000000000000000` → HTTP 403 |
 | AuditLog | INSERT-only, niemals UPDATE/DELETE |
 
 ---

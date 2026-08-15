@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 
 @Component({
   selector: 'app-root',
@@ -58,6 +58,10 @@ import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
         </a>
       </div>
       <span style="color:#475569;font-size:0.75rem">dev-profil aktiv</span>
+      <button (click)="logout()"
+              style="background:none;border:1px solid #334155;border-radius:6px;color:#94a3b8;font-size:0.75rem;padding:0.25rem 0.75rem;cursor:pointer">
+        Abmelden
+      </button>
     </nav>
     <main style="padding:2rem;max-width:1200px;margin:0 auto">
       <router-outlet />
@@ -69,4 +73,11 @@ import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 })
 export class AppComponent {
   isB2bActive = false;
+
+  constructor(private router: Router) {}
+
+  logout(): void {
+    localStorage.removeItem('access_token');
+    this.router.navigate(['/login']);
+  }
 }

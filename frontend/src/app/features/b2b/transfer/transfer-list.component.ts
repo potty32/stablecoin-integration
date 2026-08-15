@@ -99,6 +99,11 @@ import {
                     ✕ Ablehnen
                   </button>
                 </ng-container>
+                <div *ngIf="actionErrors[tx.transactionId]"
+                     style="margin-top:0.5rem;display:flex;align-items:flex-start;gap:0.375rem;padding:0.4rem 0.625rem;background:#fef2f2;border:1px solid #fecaca;border-radius:4px;max-width:260px">
+                  <span style="color:#dc2626;flex-shrink:0">&#9888;</span>
+                  <span style="color:#991b1b;font-size:0.75rem;line-height:1.4">{{ actionErrors[tx.transactionId] }}</span>
+                </div>
               </td>
             </tr>
             <tr *ngIf="transactions.length === 0">
@@ -141,6 +146,7 @@ export class TransferListComponent implements OnInit {
   loading = false;
   error = '';
   hovered = '';
+  actionErrors: Record<string, string> = {};
 
   currentPage = 0;
   pageSize = 20;
@@ -192,19 +198,35 @@ export class TransferListComponent implements OnInit {
   approve(transactionId: string): void {
     const approverId = prompt('Approver-ID eingeben:');
     if (!approverId) return;
+    delete this.actionErrors[transactionId];
     this.txService.approveTransfer(transactionId, approverId).subscribe({
       next: () => this.load(),
-      error: (err: { message?: string }) => alert('Fehler: ' + (err.message ?? 'Unbekannter Fehler'))
+      error: (err: { error?: { errorCode?: string; message?: string; traceId?: string } }) => {
+        this.actionErrors[transactionId] = this.friendlyError(err.error);
+      }
     });
   }
 
   reject(transactionId: string): void {
     const approverId = prompt('Approver-ID für Ablehnung eingeben:');
     if (!approverId) return;
+    delete this.actionErrors[transactionId];
     this.txService.rejectTransfer(transactionId, approverId).subscribe({
       next: () => this.load(),
-      error: (err: { message?: string }) => alert('Fehler: ' + (err.message ?? 'Unbekannter Fehler'))
+      error: (err: { error?: { errorCode?: string; message?: string; traceId?: string } }) => {
+        this.actionErrors[transactionId] = this.friendlyError(err.error);
+      }
     });
+  }
+
+  private friendlyError(body?: { errorCode?: string; message?: string; traceId?: string }): string {
+    const map: Record<string, string> = {
+      TAURUS_001: 'Betrag überschreitet das Custody-Einzellimit von 1.000.000 EUR. Transfer muss aufgeteilt werden.',
+      COMPLIANCE_001: 'Freigabe durch Compliance-Prüfung blockiert.',
+      SYS_001: 'Systemfehler – bitte Support kontaktieren.',
+    };
+    const text = body?.errorCode ? (map[body.errorCode] ?? body.message) : (body?.message ?? 'Unbekannter Fehler');
+    return body?.traceId ? `${text} (Trace: ${body.traceId.substring(0, 8)})` : (text ?? 'Unbekannter Fehler');
   }
 
   statusStyle(status: string): string {

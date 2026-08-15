@@ -12,7 +12,7 @@ import java.util.List;
 @Profile("dev")
 public class MockChainalysisClient implements ChainalysisClient {
 
-    private static final String HIGH_RISK_ADDRESS = "0xHighRiskAddress000000000000000000000000";
+    private static final String HIGH_RISK_ADDRESS = "0xDEAD000000000000000000000000000000000000";
 
     @Override
     public AddressScreenResponseDto screenAddress(AddressScreenRequestDto request) {

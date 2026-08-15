@@ -1,9 +1,10 @@
-import { Component, inject, OnDestroy } from '@angular/core';
+import { Component, inject, OnDestroy, OnInit } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { Subscription, interval } from 'rxjs';
-import { TransactionService, RateQuoteResponse } from '../../../core/services/transaction.service';
+import { TransactionService, RateQuoteResponse, AddressBookEntry } from '../../../core/services/transaction.service';
+import { AuthService } from '../../../core/services/auth.service';
 
 @Component({
   selector: 'app-transfer-form',
@@ -30,8 +31,41 @@ import { TransactionService, RateQuoteResponse } from '../../../core/services/tr
 
         <div>
           <label style="display:block;font-size:0.8rem;font-weight:600;color:#374151;margin-bottom:0.375rem">Ziel-Wallet-Adresse</label>
-          <input formControlName="destinationWallet" type="text" placeholder="0xABCDEF..."
+
+          <!-- Adressbuch-Picker -->
+          @if (addressBook.length > 0) {
+            <div style="margin-bottom:0.5rem;display:flex;flex-wrap:wrap;gap:0.375rem">
+              @for (entry of addressBook; track entry.id) {
+                <button type="button"
+                        (click)="pickAddress(entry)"
+                        [style.background]="selectedEntry?.id === entry.id ? '#dbeafe' : '#f8fafc'"
+                        [style.border]="selectedEntry?.id === entry.id ? '1px solid #93c5fd' : '1px solid #e2e8f0'"
+                        style="padding:0.25rem 0.625rem;border-radius:20px;font-size:0.78rem;font-weight:500;color:#374151;cursor:pointer;display:flex;align-items:center;gap:0.375rem">
+                  <span [style.color]="entry.currency === 'USDC' ? '#2563eb' : '#059669'"
+                        style="font-size:0.7rem;font-weight:700">{{ entry.currency }}</span>
+                  {{ entry.label }}
+                </button>
+              }
+            </div>
+          }
+          @if (addressBookLoading) {
+            <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:0.375rem">Adressbuch wird geladen…</div>
+          }
+          @if (!addressBookLoading && addressBook.length === 0) {
+            <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:0.375rem">
+              Noch keine Einträge im
+              <a routerLink="/b2b/address-book" style="color:#2563eb">Adressbuch</a>.
+            </div>
+          }
+
+          <!-- Wallet-Adresse (manuell oder via Picker befüllt) -->
+          <input formControlName="destinationWallet" type="text" placeholder="0xABCDEF… oder oben auswählen"
                  style="width:100%;padding:0.5rem 0.75rem;border:1px solid #e2e8f0;border-radius:6px;font-size:0.8rem;font-family:monospace">
+          @if (selectedEntry) {
+            <div style="font-size:0.75rem;color:#6b7280;margin-top:0.25rem">
+              {{ selectedEntry.label }} · Risiko: <span [style.color]="selectedEntry.riskScore === 'LOW' ? '#059669' : '#d97706'">{{ selectedEntry.riskScore }}</span>
+            </div>
+          }
           @if (form.get('destinationWallet')?.invalid && form.get('destinationWallet')?.touched) {
             <span style="color:#dc2626;font-size:0.75rem">Ungültige Ethereum-Adresse (0x + 40 Hex-Zeichen)</span>
           }
@@ -112,10 +146,11 @@ import { TransactionService, RateQuoteResponse } from '../../../core/services/tr
     </div>
   `
 })
-export class TransferFormComponent implements OnDestroy {
+export class TransferFormComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private router = inject(Router);
   private txService = inject(TransactionService);
+  private auth = inject(AuthService);
 
   submitting = false;
   quoteLoading = false;
@@ -125,13 +160,38 @@ export class TransferFormComponent implements OnDestroy {
   quoteSecondsLeft = 60;
   private countdownSub?: Subscription;
 
+  addressBook: AddressBookEntry[] = [];
+  addressBookLoading = false;
+  selectedEntry: AddressBookEntry | null = null;
+
   form = this.fb.group({
-    sourceIban: ['DE89370400440532013000', [Validators.required, Validators.minLength(15)]],
+    sourceIban: [this.auth.getIban(), [Validators.required, Validators.minLength(15)]],
     destinationWallet: ['', [Validators.required, Validators.pattern(/^0x[a-fA-F0-9]{40}$/)]],
     amountEur: [null as number | null, [Validators.required, Validators.min(0.01)]],
     currency: ['USDC' as 'USDC' | 'EURC', Validators.required],
     reference: ['']
   });
+
+  ngOnInit(): void {
+    this.addressBookLoading = true;
+    this.txService.listAddressBook().subscribe({
+      next: (entries) => {
+        this.addressBook = entries.filter(e => e.status === 'ACTIVE');
+        this.addressBookLoading = false;
+      },
+      error: () => { this.addressBookLoading = false; }
+    });
+  }
+
+  pickAddress(entry: AddressBookEntry): void {
+    this.selectedEntry = entry;
+    this.form.patchValue({ destinationWallet: entry.walletAddress });
+    if (entry.currency === 'USDC' || entry.currency === 'EURC') {
+      this.form.patchValue({ currency: entry.currency as 'USDC' | 'EURC' });
+    }
+    this.quote = null;
+    this.countdownSub?.unsubscribe();
+  }
 
   fetchQuote(): void {
     const amount = this.form.get('amountEur')?.value;

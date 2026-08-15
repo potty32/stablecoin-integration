@@ -143,10 +143,11 @@ export class TransactionService {
     return this.http.get<YieldPositionResponse>(`${this.base}/b2c/savings/yield`);
   }
 
-  depositYield(idempotencyKey: string): Observable<YieldPositionResponse> {
-    return this.http.post<YieldPositionResponse>(`${this.base}/b2c/savings/yield/deposit`, null, {
-      headers: { 'X-Idempotency-Key': idempotencyKey }
-    });
+  depositYield(idempotencyKey: string, sourceIban: string, amountEur: number): Observable<YieldPositionResponse> {
+    return this.http.post<YieldPositionResponse>(`${this.base}/b2c/savings/yield/deposit`,
+      { sourceIban, amountEur },
+      { headers: { 'X-Idempotency-Key': idempotencyKey } }
+    );
   }
 
   redeemYield(id: string): Observable<void> {

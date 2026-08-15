@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import { TransactionService, TransactionResponse } from '../../../core/services/transaction.service';
+import { AuthService } from '../../../core/services/auth.service';
 
 type Tab = 'send' | 'register';
 
@@ -172,6 +173,7 @@ type Tab = 'send' | 'register';
 export class P2pPhoneComponent {
   private fb = inject(FormBuilder);
   private txService = inject(TransactionService);
+  private auth = inject(AuthService);
 
   activeTab: Tab = 'send';
 
@@ -181,7 +183,7 @@ export class P2pPhoneComponent {
   sendSuccess: TransactionResponse | null = null;
 
   sendForm = this.fb.group({
-    sourceIban: ['', Validators.required],
+    sourceIban: [this.auth.getIban(), Validators.required],
     recipientPhone: ['', [Validators.required, Validators.pattern(/^\+[1-9]\d{6,14}$/)]],
     amountEur: [null as number | null, [Validators.required, Validators.min(0.01)]]
   });
@@ -222,7 +224,7 @@ export class P2pPhoneComponent {
   registerSuccess = false;
 
   registerForm = this.fb.group({
-    sourceIban: ['', Validators.required],
+    sourceIban: [this.auth.getIban(), Validators.required],
     phoneNumber: ['', [Validators.required, Validators.pattern(/^\+[1-9]\d{6,14}$/)]],
     walletAddress: ['', Validators.required]
   });

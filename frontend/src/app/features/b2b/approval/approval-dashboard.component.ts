@@ -71,7 +71,7 @@ import {
                       [disabled]="actioning === tx.transactionId"
                       style="background:#16a34a;color:white;border:none;padding:0.5rem 1.25rem;border-radius:6px;font-size:0.875rem;cursor:pointer;font-weight:500;min-width:120px"
                       [style.opacity]="actioning === tx.transactionId ? '0.6' : '1'">
-                ✓ Freigeben
+                {{ actioning === tx.transactionId ? 'Wird verarbeitet…' : '✓ Freigeben' }}
               </button>
               <button (click)="reject(tx.transactionId)"
                       [disabled]="actioning === tx.transactionId"
@@ -80,6 +80,11 @@ import {
                 ✕ Ablehnen
               </button>
             </div>
+          </div>
+          <div *ngIf="actionErrors[tx.transactionId]"
+               style="margin-top:0.75rem;padding:0.625rem 0.875rem;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;display:flex;align-items:flex-start;gap:0.5rem">
+            <span style="color:#dc2626;font-size:1rem;flex-shrink:0">&#9888;</span>
+            <span style="color:#991b1b;font-size:0.8rem;line-height:1.4">{{ actionErrors[tx.transactionId] }}</span>
           </div>
         </div>
       </div>
@@ -99,6 +104,7 @@ export class ApprovalDashboardComponent implements OnInit {
   loading = false;
   error = '';
   actioning = '';
+  actionErrors: Record<string, string> = {};
 
   ngOnInit(): void {
     this.load();
@@ -107,13 +113,14 @@ export class ApprovalDashboardComponent implements OnInit {
   load(): void {
     this.loading = true;
     this.error = '';
+    this.actionErrors = {};
     this.txService.listB2bTransfers(0, 50, 'AWAITING_APPROVAL').subscribe({
       next: page => {
         this.pending = page.content;
         this.loading = false;
       },
-      error: (err: { message?: string }) => {
-        this.error = err.message ?? 'Fehler beim Laden.';
+      error: (err: { error?: { message?: string } }) => {
+        this.error = err.error?.message ?? 'Fehler beim Laden.';
         this.loading = false;
       }
     });
@@ -123,14 +130,12 @@ export class ApprovalDashboardComponent implements OnInit {
     const approverId = prompt('Approver-ID eingeben:');
     if (!approverId) return;
     this.actioning = transactionId;
+    delete this.actionErrors[transactionId];
     this.txService.approveTransfer(transactionId, approverId).subscribe({
-      next: () => {
+      next: () => { this.actioning = ''; this.load(); },
+      error: (err: { error?: { errorCode?: string; message?: string; traceId?: string } }) => {
         this.actioning = '';
-        this.load();
-      },
-      error: (err: { message?: string }) => {
-        this.actioning = '';
-        alert('Fehler: ' + (err.message ?? 'Unbekannter Fehler'));
+        this.actionErrors[transactionId] = this.friendlyError(err.error);
       }
     });
   }
@@ -139,15 +144,23 @@ export class ApprovalDashboardComponent implements OnInit {
     const approverId = prompt('Approver-ID für Ablehnung eingeben:');
     if (!approverId) return;
     this.actioning = transactionId;
+    delete this.actionErrors[transactionId];
     this.txService.rejectTransfer(transactionId, approverId).subscribe({
-      next: () => {
+      next: () => { this.actioning = ''; this.load(); },
+      error: (err: { error?: { errorCode?: string; message?: string; traceId?: string } }) => {
         this.actioning = '';
-        this.load();
-      },
-      error: (err: { message?: string }) => {
-        this.actioning = '';
-        alert('Fehler: ' + (err.message ?? 'Unbekannter Fehler'));
+        this.actionErrors[transactionId] = this.friendlyError(err.error);
       }
     });
+  }
+
+  private friendlyError(body?: { errorCode?: string; message?: string; traceId?: string }): string {
+    const map: Record<string, string> = {
+      TAURUS_001: 'Betrag überschreitet das Custody-Einzellimit von 1.000.000 EUR. Transfer muss aufgeteilt werden.',
+      COMPLIANCE_001: 'Freigabe durch Compliance-Prüfung blockiert.',
+      SYS_001: 'Systemfehler – bitte Support kontaktieren.',
+    };
+    const text = body?.errorCode ? (map[body.errorCode] ?? body.message) : (body?.message ?? 'Unbekannter Fehler');
+    return body?.traceId ? `${text} (Trace: ${body.traceId.substring(0, 8)})` : (text ?? 'Unbekannter Fehler');
   }
 }
