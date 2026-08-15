@@ -290,6 +290,7 @@ Auth-Guard schützt alle `/b2b/*` und `/b2c/*` Routen.
 
 ## 11. Offene Punkte / Nächste Schritte
 
+- **Kontostand-Anzeige im Frontend**: `GET /api/v1/accounts/{iban}/balance` ist vollständig implementiert, wird aber von keiner Frontend-Komponente aufgerufen. Sinnvoller nächster Schritt: Saldo-Widget in Formular-Header oder dediziertes Dashboard einbauen. Außerdem fehlt aktuell die Prüfung, ob die abgefragte IBAN dem eingeloggten Nutzer gehört (kein Ownership-Check im Controller).
 - **Angular Production Build**: `ng build --configuration production` noch nicht verifiziert
 - **Railway Deploy**: Prod-Secrets (Circle/Taurus/Chainalysis API-Keys) fehlen noch
 - **mTLS-Zertifikate**: Für Railway manuell bereitstellen (`SSL_KEYSTORE_PATH`)
