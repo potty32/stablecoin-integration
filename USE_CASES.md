@@ -1,37 +1,71 @@
 # Use Cases — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: 2026-08-17  
-> Alle 22 Use Cases mit Summary, fachlicher Einordnung, beteiligten Klassen,
-> Sequenzdiagramm (ASCII) und Code-Schnipseln.
+> Erstellt: 2026-08-17 | Letzte Aktualisierung: 2026-08-17  
+> Alle Use Cases mit Summary, fachlicher Einordnung, beteiligten Klassen,
+> Sequenzdiagramm (ASCII) und Code-Schnipseln.  
+> Vollständig aktualisierte Version: siehe `USE_CASES_v2.md`
+
+---
+
+## Changelog
+
+### 2026-08-17 — Commit `653ade6` · B2B Auslandsüberweisung Weiterentwicklung
+
+| UC | Änderung |
+|---|---|
+| UC-01 | **Whitelist-Erzwingung:** Transfer schlägt mit 403 fehl wenn Zieladresse weder in Kunden- noch institutioneller Whitelist steht |
+| UC-01 | **Live FX-Kurs:** `BASE_RATE` (hardcoded 1.0) durch `FxRateService` ersetzt — EURC=1.0, USDC=ECB-Referenzkurs (~1.0823) |
+| UC-04 | **IAM Approver:** `approverId` kommt aus JWT (`auth.getName()`), nicht mehr aus Request-Body |
+| UC-04 | **Selbst-Genehmigung:** Initiator ≠ Approver wird technisch erzwungen (`!devMode`) |
+| UC-05 | **IAM Ablehner:** Analog UC-04 — `approverId` aus JWT, Selbst-Ablehnung blockiert |
+| UC-06 | **Live FX-Kurs:** Rate-Quote für USDC liefert jetzt ~1.0839 statt 1.0015 |
+| — | **NEU UC-23:** Nachtlicher Sanctions-Batch (`SanctionsBatchService`, cron 02:00) |
+
+### 2026-08-17 — Commit `517fa52` · Ownership-Check, Institutionelle Whitelist, Balance-Widget, Tests
+
+| UC | Änderung |
+|---|---|
+| UC-01 | **Institutionelle Whitelist (OR-Logik):** Transfer akzeptiert wenn Zieladresse in Kunden-ODER institutioneller Whitelist |
+| UC-21 | **Ownership-Check:** `getBalance()` prüft ob angeforderte IBAN dem JWT-User gehört → 403 AUTH_001 bei Fremdzugriff |
+| UC-21 | **Balance-Widget:** Frontend `TransferListComponent` zeigt jetzt EUR + USDC/EURC-Kontostand |
+| UC-22 | **Ownership-Check:** `getTransaction()` prüft ob TX dem JWT-User gehört → 403 AUTH_001 |
+| — | **NEU UC-24:** Institutionelle Adresse hinzufügen |
+| — | **NEU UC-25:** Institutionelle Adressen auflisten |
+| — | **NEU UC-26:** Institutionelle Adresse widerrufen |
+| — | **NEU:** Integrationstests (Testcontainers, 5 Tests, `src/test/`) |
 
 ---
 
 ## Übersicht
 
-| # | Bereich | Use Case | Endpunkt |
-|---|---|---|---|
-| UC-01 | B2B | Transfer initiieren | POST /api/v1/b2b/transfers |
-| UC-02 | B2B | Transfers auflisten | GET /api/v1/b2b/transfers |
-| UC-03 | B2B | Transfer-Detail abrufen | GET /api/v1/b2b/transfers/{id} |
-| UC-04 | B2B | Transfer freigeben (Vier-Augen) | POST /api/v1/b2b/transfers/{id}/approve |
-| UC-05 | B2B | Transfer ablehnen | POST /api/v1/b2b/transfers/{id}/reject |
-| UC-06 | B2B | FX-Kurs sichern (Rate-Quote) | GET /api/v1/b2b/rate-quote |
-| UC-07 | B2B | Adresse whitelisten | POST /api/v1/b2b/address-book |
-| UC-08 | B2B | Adressbuch auflisten | GET /api/v1/b2b/address-book |
-| UC-09 | B2B | Adresse widerrufen | DELETE /api/v1/b2b/address-book/{id} |
-| UC-10 | B2B | Bulk-Payment per CSV | POST /api/v1/b2b/bulk-payments |
-| UC-11 | B2B | Export CAMT.053 (ISO 20022) | GET /api/v1/b2b/export/camt053 |
-| UC-12 | B2B | Export DATEV-CSV | GET /api/v1/b2b/export/datev |
-| UC-13 | B2C | Auslandsüberweisung (Remittance) | POST /api/v1/b2c/remittances |
-| UC-14 | B2C | P2P-Zahlung via Telefonnummer | POST /api/v1/b2c/p2p/phone |
-| UC-15 | B2C | Telefon-Alias registrieren | POST /api/v1/b2c/p2p/phone/register |
-| UC-16 | B2C | Yield-Sparkonto eröffnen | POST /api/v1/b2c/savings/yield/deposit |
-| UC-17 | B2C | Yield-Position auflösen | DELETE /api/v1/b2c/savings/yield/{id} |
-| UC-18 | B2C | Yield-Position abrufen | GET /api/v1/b2c/savings/yield |
-| UC-19 | B2C | Card-Wallet abrufen | GET /api/v1/b2c/card/wallet |
-| UC-20 | B2C | Biometrie-Micropayment | POST /api/v1/b2c/micropayments |
-| UC-21 | Common | Kontostand abfragen | GET /api/v1/accounts/{iban}/balance |
-| UC-22 | Common | Transaktion abrufen | GET /api/v1/transactions/{id} |
+| # | Bereich | Use Case | Endpunkt | Status |
+|---|---|---|---|---|
+| UC-01 | B2B | Transfer initiieren | POST /api/v1/b2b/transfers | **Geändert** |
+| UC-02 | B2B | Transfers auflisten | GET /api/v1/b2b/transfers | |
+| UC-03 | B2B | Transfer-Detail abrufen | GET /api/v1/b2b/transfers/{id} | |
+| UC-04 | B2B | Transfer freigeben (Vier-Augen) | POST /api/v1/b2b/transfers/{id}/approve | **Geändert** |
+| UC-05 | B2B | Transfer ablehnen | POST /api/v1/b2b/transfers/{id}/reject | **Geändert** |
+| UC-06 | B2B | FX-Kurs sichern (Rate-Quote) | GET /api/v1/b2b/rate-quote | **Geändert** |
+| UC-07 | B2B | Adresse whitelisten | POST /api/v1/b2b/address-book | |
+| UC-08 | B2B | Adressbuch auflisten | GET /api/v1/b2b/address-book | |
+| UC-09 | B2B | Adresse widerrufen | DELETE /api/v1/b2b/address-book/{id} | |
+| UC-10 | B2B | Bulk-Payment per CSV | POST /api/v1/b2b/bulk-payments | |
+| UC-11 | B2B | Export CAMT.053 (ISO 20022) | GET /api/v1/b2b/export/camt053 | |
+| UC-12 | B2B | Export DATEV-CSV | GET /api/v1/b2b/export/datev | |
+| UC-13 | B2C | Auslandsüberweisung (Remittance) | POST /api/v1/b2c/remittances | |
+| UC-14 | B2C | P2P-Zahlung via Telefonnummer | POST /api/v1/b2c/p2p/phone | |
+| UC-15 | B2C | Telefon-Alias registrieren | POST /api/v1/b2c/p2p/phone/register | |
+| UC-16 | B2C | Yield-Sparkonto eröffnen | POST /api/v1/b2c/savings/yield/deposit | |
+| UC-17 | B2C | Yield-Position auflösen | DELETE /api/v1/b2c/savings/yield/{id} | |
+| UC-18 | B2C | Yield-Position abrufen | GET /api/v1/b2c/savings/yield | |
+| UC-19 | B2C | Card-Wallet abrufen | GET /api/v1/b2c/card/wallet | |
+| UC-20 | B2C | Biometrie-Micropayment | POST /api/v1/b2c/micropayments | |
+| UC-21 | Common | Kontostand abfragen | GET /api/v1/accounts/{iban}/balance | **Geändert** |
+| UC-22 | Common | Transaktion abrufen | GET /api/v1/transactions/{id} | **Geändert** |
+| UC-23 | B2B | Nachtlicher Sanctions-Batch | POST /api/v1/b2b/admin/sanctions-scan | **NEU** |
+| UC-24 | B2B | Inst. Adresse hinzufügen | POST /api/v1/b2b/institutional-address-book | **NEU** |
+| UC-25 | B2B | Inst. Adressen auflisten | GET /api/v1/b2b/institutional-address-book | **NEU** |
+| UC-26 | B2B | Inst. Adresse widerrufen | DELETE /api/v1/b2b/institutional-address-book/{id} | **NEU** |
 
 ---
 
@@ -39,18 +73,22 @@
 
 ---
 
-### UC-01 · Transfer initiieren
+### UC-01 · Transfer initiieren `[Geändert 2026-08-17]`
+
+> **Änderungen:** Whitelist-Erzwingung + institutionelle Whitelist (OR-Logik) + Live FX-Kurs via ECB
 
 **Summary**
 Ein Firmenkunde löst eine Outbound-Stablecoin-Zahlung aus (EUR → USDC/EURC auf Polygon).
-Der Service prüft Idempotenz, persistiert die Transaktion, führt Compliance-Screen und
-Blockchain-Settlement durch — oder parkt die TX bei Vier-Augen-Pflicht.
+Der Service prüft Idempotenz, Whitelist-Zugehörigkeit (Kunden- oder institutionelle Liste),
+führt Compliance-Screen und Blockchain-Settlement durch — oder parkt die TX bei Vier-Augen-Pflicht.
 
 **Fachliche Einordnung**
 - Kernprozess des "Turbo Rail": klassische SWIFT-Überweisung wird durch Circle + Taurus auf Blockchain ersetzt
 - MiCA-Pflicht: AML-Screening (Chainalysis) vor jedem Settlement
+- **[NEU]** Whitelist-Pflicht: Zieladresse muss ACTIVE in Kunden-Adressbuch ODER institutioneller Whitelist stehen
 - Vier-Augen-Regel greift wenn `amountEur > txLimitSingle` (Seed: 25.000 EUR für B2B)
 - Gebühr: 2,50 EUR Flat + 0,15% FX-Spread
+- **[NEU]** FX-Rate: EURC=1.0 (fix), USDC=ECB-Referenzkurs live via `FxRateService`
 - Rate-Quote optional: Kurs kann 60 Sekunden vorher gesichert werden
 
 **Beteiligte Klassen**
@@ -301,7 +339,9 @@ private List<TransactionResponse.TimelineEntry> buildTimeline(UUID txId) {
 
 ---
 
-### UC-04 · Transfer freigeben (Vier-Augen)
+### UC-04 · Transfer freigeben (Vier-Augen) `[Geändert 2026-08-17]`
+
+> **Änderungen:** `approverId` kommt jetzt aus JWT; Selbst-Genehmigung technisch unmöglich
 
 **Summary**
 Ein zweiter Autorisierter gibt einen `AWAITING_APPROVAL`-Transfer frei. Der ApprovalWorkflow
@@ -310,7 +350,8 @@ wird committed, dann läuft der normale Transfer-Flow durch.
 **Fachliche Einordnung**
 - MiCA-Anforderung: Transaktionen über 25.000 EUR brauchen Dual-Control
 - 24h Approval-Fenster: läuft ab → `EXPIRED`, Transfer kann nicht mehr freigegeben werden
-- `approverId` ist derzeit freier String (kein echtes IAM-System — offener Punkt)
+- **[NEU]** `approverId` wird aus dem JWT (`auth.getName()`) übernommen — Request-Body-Wert ignoriert
+- **[NEU]** Selbst-Genehmigung: `workflow.getInitiatorId().equals(approverId)` → 400 BIZ_001 (außer `dev-mode=true`)
 
 **Beteiligte Klassen**
 
@@ -377,7 +418,9 @@ public UUID commitApproval(UUID transactionId, ApproveTransferRequest request) {
 
 ---
 
-### UC-05 · Transfer ablehnen
+### UC-05 · Transfer ablehnen `[Geändert 2026-08-17]`
+
+> **Änderungen:** `approverId` aus JWT; Selbst-Ablehnung blockiert (analog UC-04)
 
 **Summary**
 Zweiter Autorisierter lehnt einen wartenden Transfer ab. Workflow → `REJECTED`, TX → `FAILED`.
@@ -448,7 +491,9 @@ public TransactionResponse reject(UUID transactionId, ApproveTransferRequest req
 
 ---
 
-### UC-06 · FX-Kurs sichern (Rate-Quote)
+### UC-06 · FX-Kurs sichern (Rate-Quote) `[Geändert 2026-08-17]`
+
+> **Änderungen:** USDC-Rate kommt jetzt live vom ECB (war hardcoded 1.0)
 
 **Summary**
 Firmenkunde fragt einen verbindlichen EUR→USDC/EURC-Kurs ab, der 60 Sekunden gültig ist
@@ -458,6 +503,8 @@ und beim Transfer-Initiate verwendet werden kann.
 - MiCA Art. 23: Kurs muss dem Kunden vor Auftragserteilung mitgeteilt werden
 - Quote-ID kann in `InitiateTransferRequest.rateQuoteId` übergeben werden
 - Nach Verbrauch: Quote-Status → `USED`; nach Ablauf: `EXPIRED`
+- **[NEU]** EURC: Basisrate=1.0 (1:1 mit EUR) | USDC: Basisrate=ECB EUR/USD-Referenzkurs via `FxRateService`
+- Dev-Mock: `MockFxRateClient` → 1.0823 | Prod: `HttpEcbRateClient` → live ECB SDMX-JSON
 
 **Beteiligte Klassen**
 
@@ -1358,15 +1405,18 @@ private String resolveMerchantWallet(String merchantId) {
 
 ---
 
-### UC-21 · Kontostand abfragen
+### UC-21 · Kontostand abfragen `[Geändert 2026-08-17]`
+
+> **Änderungen:** Ownership-Check (403 bei Fremdzugriff) + Balance-Widget im Frontend
 
 **Summary**
 Gibt EUR-Guthaben (aus Core Banking) und USDC/EURC-Guthaben (von Circle)
-für eine IBAN in einer Response zurück.
+für eine IBAN in einer Response zurück. Nur der Account-Inhaber darf seine eigene IBAN abfragen.
 
 **Fachliche Einordnung**
 - Einziger Endpunkt der beide Welten (Fiat + Stablecoin) vereint
-- IBAN-Lookup prüft ob der Account existiert, dann Abfragen an zwei Systeme
+- **[NEU]** Ownership-Check: `auth.getName()` → `findByCustomerId()` → `account.getIban().equals(iban)` → sonst 403 AUTH_001
+- **[NEU]** Frontend: `TransferListComponent` ruft `getAccountBalance(iban)` in `ngOnInit()` auf und zeigt Balance-Widget
 - In Prod: Wallet-ID aus Account-Record; derzeit vereinfacht mit `BANK_MASTER_WALLET_ID`
 
 **Beteiligte Klassen**
@@ -1425,16 +1475,20 @@ public ResponseEntity<AccountBalanceResponse> getBalance(
 
 ---
 
-### UC-22 · Transaktion abrufen (Cross-Domain)
+### UC-22 · Transaktion abrufen (Cross-Domain) `[Geändert 2026-08-17]`
+
+> **Änderungen:** Ownership-Check (403 wenn TX nicht dem JWT-User gehört)
 
 **Summary**
 Einzelne Transaktion per UUID abrufbar — unabhängig ob B2B oder B2C.
 Gibt vollständige Details inkl. Status-Timeline aus dem AuditLog zurück.
+Nur der Inhaber der Transaktion darf sie abrufen.
 
 **Fachliche Einordnung**
 - Einzige domänenagnostische TX-Abfrage
 - `requiresApproval`-Flag: prüft ob ein `ApprovalWorkflow` existiert
 - Timeline-Logik identisch zu UC-03
+- **[NEU]** Ownership-Check: `tx.getCustomerAccount().getId().equals(requestingAccount.getId())` → sonst 403 AUTH_001
 
 **Beteiligte Klassen**
 
@@ -1492,6 +1546,185 @@ public ResponseEntity<TransactionResponse> getTransaction(
   in Prod muss hier eine Autorisierungsprüfung rein
 - `buildTimeline()` ist Code-Duplikat zu `B2bTransferService.buildTimeline()` —
   könnte in eine gemeinsame Utility-Klasse extrahiert werden
+
+---
+
+---
+
+## Neue Use Cases (2026-08-17)
+
+---
+
+### UC-23 · Nachtlicher Sanctions-Batch `[NEU 2026-08-17]`
+
+**Summary**
+Täglich um 02:00 Uhr scannt ein Scheduler alle ACTIVE-Adressbucheinträge gegen Chainalysis.
+Neu-klassifizierte HIGH_RISK-Adressen werden auf REVOKED gesetzt und via n8n gemeldet.
+Manuell auslösbar über einen Admin-Endpunkt.
+
+**Fachliche Einordnung**
+- FATF/MiCA: Sanktionslisten (OFAC SDN, EU-Konsolidierte Liste) werden täglich aktualisiert
+- Eine heute LOW_RISK-Adresse kann morgen auf der OFAC-Liste stehen
+- Fail-safe: Ein Fehler bei einer Adresse bricht nicht den gesamten Batch ab
+- n8n-Benachrichtigung (best effort): Netzwerkfehler werden geloggt, nicht propagiert
+- Manueller Trigger für Tests/Notfall: `POST /api/v1/b2b/admin/sanctions-scan`
+
+**Beteiligte Klassen**
+
+| Klasse | Rolle |
+|---|---|
+| `SanctionsBatchService` | `@Scheduled(cron = "0 0 2 * * ?")`, Hauptlogik |
+| `AddressBookRepository.findByStatus(ACTIVE)` | Alle aktiven Einträge laden |
+| `ChainalysisClient` | Screening pro Adresse |
+| `AuditLogRepository` | INSERT `SANCTIONS_BATCH_REVOKED` |
+| `N8nWebhookClient.notifyAddressRevoked()` | Kundenmeldung (best effort) |
+| `B2bController.triggerSanctionsScan()` | Admin-Endpunkt manueller Trigger |
+
+**Sequenzdiagramm**
+
+```
+Scheduler (täglich 02:00) ODER Admin
+  │  POST /api/v1/b2b/admin/sanctions-scan (manueller Trigger)
+  ▼
+SanctionsBatchService.runNightlySanctionsScan()
+  │
+  ├── AddressBookRepository.findByStatus(ACTIVE) → alle aktiven Einträge
+  │
+  └── Pro AddressBook-Eintrag: screenAndRevokeIfHighRisk()
+        ├── ChainalysisClient.screenAddress(wallet, currency, POLYGON, outgoing)
+        │
+        ├─ [approved=true] → weiter (nichts tun)
+        │
+        └─ [approved=false / HIGH_RISK]
+              ├── DB: address.status = REVOKED
+              ├── DB: AuditLog SANCTIONS_BATCH_REVOKED (entityId=addressId, userId="SYSTEM")
+              ├── N8nClient.notifyAddressRevoked(wallet, customerId, riskScore) [best effort]
+              └── log.warn REVOKED
+
+  └── log.info "Scan complete. revoked=X/Y"
+```
+
+**Code-Schnipsel**
+
+```java
+@Scheduled(cron = "0 0 2 * * ?")
+@Transactional
+public void runNightlySanctionsScan() {
+    List<AddressBook> active = addressBookRepository.findByStatus(AddressStatus.ACTIVE);
+    log.info("[SANCTIONS-BATCH] Starting scan for {} active addresses", active.size());
+    int revoked = 0;
+    for (AddressBook address : active) {
+        try {
+            if (screenAndRevokeIfHighRisk(address)) revoked++;
+        } catch (Exception e) {
+            log.error("[SANCTIONS-BATCH] Error screening address={}: {}",
+                address.getWalletAddress(), e.getMessage());
+        }
+    }
+    log.info("[SANCTIONS-BATCH] Done. revoked={}/{}", revoked, active.size());
+}
+```
+
+**Wichtige Punkte**
+- `@EnableScheduling` war bereits in `StablecoinApplication` aktiv — kein neues Setup nötig
+- Der Admin-Endpunkt `POST /admin/sanctions-scan` ist nicht per IAM gesichert — in Prod sollte er ROLE_ADMIN brauchen
+- AuditLog-`userId` = `"SYSTEM"` (kein authentifizierter User im Scheduler-Context)
+
+---
+
+### UC-24 · Institutionelle Adresse hinzufügen `[NEU 2026-08-17]`
+
+**Summary**
+Bank-Administrator fügt eine regulierte Gegenpartei (Coinbase Custody, Kraken etc.) zur
+bank-weiten institutionellen Whitelist hinzu. Chainalysis-Screen ist Pflicht.
+
+**Fachliche Einordnung**
+- Bank-weite Whitelist — KEIN `customer_account_id` FK, gilt für alle Kunden
+- Vermeidet, dass jeder Kunde dieselbe Regulierte-Gegenpartei-Adresse einzeln whitelisten muss
+- Chainalysis-Screen: HIGH_RISK → 403 COMPLIANCE_001 (Fail-Closed)
+- Eindeutigkeitsbedingung: `UNIQUE(wallet_address, currency)` — gleiche Adresse kann nicht zweimal (pro Währung) eingetragen werden
+
+**Beteiligte Klassen**
+
+| Klasse | Rolle |
+|---|---|
+| `B2bController.addInstitutionalAddress()` | POST /institutional-address-book |
+| `InstitutionalAddressBookService.addAddress()` | Chainalysis-Screen + Persist |
+| `InstitutionalAddressBookRepository` | DB-Zugriff (Tabelle `institutional_address_book`) |
+| `ChainalysisClient` | Screening |
+
+**Sequenzdiagramm**
+
+```
+Admin
+  │  POST /api/v1/b2b/institutional-address-book
+  │  Body: {label, walletAddress, currency}
+  ▼
+B2bController → InstitutionalAddressBookService.addAddress() [@CircuitBreaker(chainalysis)]
+  │
+  ├── ChainalysisClient.screenAddress(wallet, currency, POLYGON, outgoing)
+  │
+  ├─ [!approved] → 403 ComplianceBlockException
+  │
+  └─ [approved]
+        ├── DB: institutional_address_book INSERT (status=ACTIVE, riskScore=LOW/MEDIUM)
+        ├── DB: AuditLog INST_ADDRESS_ADDED
+        └── ← 201 InstitutionalAddressBookResponse
+```
+
+**Wichtige Punkte**
+- Fail-Closed: Chainalysis-Ausfall → Adresse wird blockiert (analog `AddressBookService`)
+- `created_by` wird aus `auth.getName()` gesetzt — Nachvollziehbarkeit wer die Adresse hinzugefügt hat
+- Auswirkung auf UC-01: Transfer an institutionelle Adresse wird akzeptiert auch wenn sie nicht im Kunden-Adressbuch steht
+
+---
+
+### UC-25 · Institutionelle Adressen auflisten `[NEU 2026-08-17]`
+
+**Summary**
+Liste aller ACTIVE-Einträge der bank-weiten institutionellen Whitelist.
+
+**Sequenzdiagramm**
+
+```
+Client
+  │  GET /api/v1/b2b/institutional-address-book
+  ▼
+B2bController → InstitutionalAddressBookService.listAddresses() [readOnly]
+  │
+  ├── InstitutionalAddressBookRepository.findByStatus(ACTIVE)
+  └── ← 200 List<InstitutionalAddressBookResponse>
+```
+
+**Wichtige Punkte**
+- Keine Kunden-Filterung — alle ACTIVE-Einträge werden zurückgegeben (bank-weit)
+- REVOKED-Einträge werden gefiltert (Soft-Delete, DB-Eintrag bleibt für Audit)
+
+---
+
+### UC-26 · Institutionelle Adresse widerrufen `[NEU 2026-08-17]`
+
+**Summary**
+Soft-Delete einer institutionellen Whitelist-Adresse. Status → `REVOKED`.
+Ab sofort können keine Transfers mehr an diese Adresse initiiert werden (sofern sie nicht im Kunden-Adressbuch steht).
+
+**Sequenzdiagramm**
+
+```
+Admin
+  │  DELETE /api/v1/b2b/institutional-address-book/{id}
+  ▼
+B2bController → InstitutionalAddressBookService.revokeAddress(id, userId) [@Transactional]
+  │
+  ├── InstitutionalAddressBookRepository.findById(id) → 404 wenn nicht gefunden
+  ├── DB: address.status = REVOKED
+  ├── DB: AuditLog INST_ADDRESS_REVOKED
+  └── ← 204 No Content
+```
+
+**Wichtige Punkte**
+- Sofortige Wirkung: Der nächste Transfer an diese Adresse schlägt mit 403 fehl (sofern nicht im Kunden-Adressbuch)
+- Kein physisches Löschen — Eintrag bleibt in DB für Audit Trail
 
 ---
 
