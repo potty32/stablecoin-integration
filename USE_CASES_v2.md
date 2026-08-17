@@ -508,7 +508,13 @@ B2cP2pService.registerPhoneAlias() [@Transactional]
 
 **Summary**
 Privatkunde legt EURC in einem RWA-Money-Market-Fund an. Rendite: 3,5% p.a. täglich compoundiert.
-Für den Kunden: "Sparkonto mit Zinssatz" — kein Krypto-Begriff.
+Erzeugt zwei unabhängige Datensätze: einen unveränderlichen Buchungsbeleg (`YIELD_DEPOSIT` TX)
+und eine eigenständige Anlagenposition (`YieldPosition` ACTIVE).
+
+**Fachliche Einordnung**
+- `YIELD_DEPOSIT` TX: Unveränderlicher Buchungsbeleg. Status bleibt immer `SETTLED`.
+- `YieldPosition` (ACTIVE): Eigenständiger Positionslebenszyklus (ACTIVE → CLOSED). Enthält `principal`, `interestRate`, `depositedAt`.
+- Keine Mutation der YIELD_DEPOSIT TX bei Auflösung — BaFin/IT-Audit-konform.
 
 **Sequenzdiagramm**
 
@@ -518,9 +524,11 @@ Client
   ▼
 B2cYieldService.deposit() [@Transactional]
   ├── Idempotenz-Check
-  ├── DB: TX INSERT (YIELD_DEPOSIT, EURC, SETTLED, → RWA_FUND_WALLET)
-  ├── dailyYield = amountEur × 0.035/365
-  └── ← 200 YieldPositionResponse {principal, currentValue, accrued, rate=3.5%, status="ACTIVE"}
+  ├── DB: StablecoinTransaction INSERT (YIELD_DEPOSIT, EURC, SETTLED, → RWA_FUND_WALLET)
+  ├── DB: YieldPosition INSERT (ACTIVE, principal=amountEur, interestRate=0.035, depositedAt=now)
+  │         depositTransactionId = savedTx.getId()
+  ├── DB: AuditLog YIELD_DEPOSIT_CREATED (entityType="YieldPosition")
+  └── ← 200 YieldPositionResponse {positionId, amountEur, currentValueEur, status="ACTIVE"}
 ```
 
 **Code-Schnipsel**
@@ -533,26 +541,44 @@ BigDecimal factor = BigDecimal.ONE.add(dailyRate, MathContext.DECIMAL64)
 BigDecimal currentValue = principal.multiply(factor, MathContext.DECIMAL64);
 ```
 
+**Wichtige Punkte**
+- `positionId` in der Response = `YieldPosition.id` (nicht die TX-ID)
+- Die YIELD_DEPOSIT TX bleibt für immer `SETTLED` — kein Zustandswechsel je
+
 ---
 
 ### UC-17 · Yield-Position auflösen (Redeem)
 
 **Summary**
-Privatkunde löst Yield-Position auf. Aufgelaufene Zinsen werden berechnet und geloggt.
-TX erhält Status `REDEEMED` — regulatorisch sauber (BaFin/IT-Audit: FAILED = Systemfehler, REDEEMED = Geschäftsvorfall).
+Privatkunde löst eine aktive Anlageposition auf. Es wird eine **eigenständige YIELD_REDEEM Transaktion**
+erzeugt (Status: `REDEEMED`, Betrag: Anlage + Zinsen). Die `YieldPosition` wechselt auf `CLOSED`.
+Die originale `YIELD_DEPOSIT` TX bleibt unberührt.
+
+**Fachliche Einordnung**
+- `YIELD_REDEEM` TX: Auszahlungsbeleg (Anlage + aufgelaufene Zinsen). Status: `REDEEMED`.
+- `YieldPosition`: wechselt ACTIVE → CLOSED, `closedAt` wird gesetzt.
+- Keine Mutation der Einzahlungs-TX (BaFin/IT-Audit: saubere Trennung der Buchungsvorgänge).
+- Endpoint: `DELETE /api/v1/b2c/savings/yield/{positionId}` — `{positionId}` = `YieldPosition.id`
+
+**Sequenzdiagramm**
 
 ```
 Client
-  │  DELETE /api/v1/b2c/savings/yield/{id}
+  │  DELETE /api/v1/b2c/savings/yield/{positionId}
   ▼
-B2cYieldService.redeem() [@Transactional]
-  ├── [type ≠ YIELD_DEPOSIT] → 404
-  ├── [status ≠ SETTLED] → 400
-  ├── days = ChronoUnit.DAYS.between(settledAt, now)
-  ├── currentValue = principal × (1 + 0.035/365)^days
+B2cYieldService.redeem(positionId) [@Transactional]
+  ├── YieldPositionRepository.findById(positionId)  → 404 wenn nicht gefunden
+  ├── [status ≠ ACTIVE] → 400 IllegalStateException
+  ├── days = ChronoUnit.DAYS.between(position.depositedAt, now)
+  ├── currentValue = principal × (1 + 0.035/365)^days  [DECIMAL64]
   ├── accrued = currentValue − principal
-  ├── DB: tx.status = REDEEMED  ← regulatorisch korrekt (BaFin/IT-Audit konform)
-  ├── DB: AuditLog YIELD_REDEEMED {status:"REDEEMED", accruedYield, daysSinceDeposit}
+  │
+  ├── DB: StablecoinTransaction INSERT (YIELD_REDEEM, EURC, REDEEMED,
+  │         amountFiat=currentValue, ← RWA_FUND_WALLET → customer.wallet)
+  │
+  ├── DB: YieldPosition UPDATE (status=CLOSED, closedAt=now)
+  │
+  ├── DB: AuditLog YIELD_REDEEMED (ACTIVE → CLOSED, accruedYield, redeemTxId)
   └── ← 204 No Content
 ```
 
@@ -561,17 +587,28 @@ B2cYieldService.redeem() [@Transactional]
 ### UC-18 · Yield-Position abrufen
 
 **Summary**
-Gibt aktuelle Yield-Position mit live berechneten Zinsen zurück (kein Cache).
-Die Abfrage berücksichtigt nur Transaktionen im Status `SETTLED` —
-`REDEEMED`, `FAILED` und alle anderen Zustände werden ignoriert.
+Gibt die aktive `YieldPosition` mit live berechneten Zinsen zurück.
+Die Abfrage läuft direkt auf `YieldPosition` (nicht auf `StablecoinTransaction`) —
+kein Hack mit FAILED/REDEEMED-Status-Filtern auf Transaktionsebene.
+
+**Fachliche Einordnung**
+- Abfrage: `YieldPositionRepository.findByCustomerAccountIdAndStatus(ACTIVE)` → 404 wenn keine
+- `CLOSED`-Positionen werden automatisch ausgeschlossen (eigenes Feld, kein TX-Status-Hack)
+- `positionId` im Response verweist direkt auf `YieldPosition.id`
+
+**Sequenzdiagramm**
 
 ```
-Client → B2cYieldService.getPosition() [readOnly]
-  ├── TxRepository.findFirstBy...YIELD_DEPOSIT + SETTLED → 404 wenn keine aktive Position
-  │     (REDEEMED-Positionen werden NICHT gefunden → korrekte Filterung)
-  ├── days = now − depositedAt
-  ├── currentValue = principal × (1 + 0.035/365)^days
-  └── ← 200 YieldPositionResponse (live)
+Client
+  │  GET /api/v1/b2c/savings/yield
+  ▼
+B2cYieldService.getPosition() [readOnly]
+  ├── AccountRepository.findByCustomerId(auth.getName())
+  ├── YieldPositionRepository.findByCustomerAccountIdAndStatus(ACTIVE)
+  │     └── [nicht gefunden] → 404 NoSuchElementException
+  ├── days = ChronoUnit.DAYS.between(position.depositedAt, now)
+  ├── currentValue = principal × (1 + 0.035/365)^days  [live, kein Cache]
+  └── ← 200 YieldPositionResponse {positionId, amountEur, currentValueEur, status="ACTIVE"}
 ```
 
 ---

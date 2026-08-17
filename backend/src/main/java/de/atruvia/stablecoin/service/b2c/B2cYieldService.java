@@ -7,6 +7,7 @@ import de.atruvia.stablecoin.exception.IdempotencyConflictException;
 import de.atruvia.stablecoin.repository.AuditLogRepository;
 import de.atruvia.stablecoin.repository.CustomerAccountRepository;
 import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
+import de.atruvia.stablecoin.repository.YieldPositionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,20 +30,24 @@ public class B2cYieldService {
     private static final BigDecimal ANNUAL_RATE_DECIMAL = new BigDecimal("0.035");
     private static final BigDecimal DAYS_PER_YEAR = new BigDecimal("365");
     private static final String RWA_FUND_WALLET = "0xRWAMoneyMarketFund000000000000000000001";
-    private static final String STATUS_ACTIVE = "ACTIVE";
 
     private final StablecoinTransactionRepository txRepository;
     private final CustomerAccountRepository accountRepository;
     private final AuditLogRepository auditLogRepository;
+    private final YieldPositionRepository yieldPositionRepository;
 
     public B2cYieldService(
             StablecoinTransactionRepository txRepository,
             CustomerAccountRepository accountRepository,
-            AuditLogRepository auditLogRepository) {
+            AuditLogRepository auditLogRepository,
+            YieldPositionRepository yieldPositionRepository) {
         this.txRepository = txRepository;
         this.accountRepository = accountRepository;
         this.auditLogRepository = auditLogRepository;
+        this.yieldPositionRepository = yieldPositionRepository;
     }
+
+    // ── UC-16: Yield-Sparkonto eröffnen ──────────────────────────────────────
 
     @Transactional
     public YieldPositionResponse deposit(String idempotencyKey, YieldDepositRequest request, String userId) {
@@ -52,6 +57,7 @@ public class B2cYieldService {
         CustomerAccount account = accountRepository.findByIban(request.sourceIban())
                 .orElseThrow(() -> new NoSuchElementException("Account not found for IBAN: " + request.sourceIban()));
 
+        // 1. YIELD_DEPOSIT Transaktion — unveränderlicher Buchungsbeleg
         StablecoinTransaction tx = new StablecoinTransaction();
         tx.setIdempotencyKey(idempotencyKey);
         tx.setCustomerAccount(account);
@@ -65,102 +71,122 @@ public class B2cYieldService {
         tx.setSettledAt(LocalDateTime.now());
         StablecoinTransaction savedTx = txRepository.save(tx);
 
-        saveAuditLog(savedTx.getId(), "YIELD_DEPOSIT_CREATED", null,
-                String.format("{\"status\":\"SETTLED\",\"amount\":\"%s\",\"annualRate\":\"%s%%\"}",
-                        request.amountEur(), ANNUAL_YIELD_RATE),
+        // 2. YieldPosition — eigenständiger Positionslebenszyklus
+        YieldPosition position = new YieldPosition();
+        position.setCustomerAccount(account);
+        position.setPrincipal(request.amountEur());
+        position.setInterestRate(ANNUAL_RATE_DECIMAL);
+        position.setDepositedAt(LocalDateTime.now());
+        position.setStatus(YieldStatus.ACTIVE);
+        position.setDepositTransactionId(savedTx.getId());
+        YieldPosition savedPosition = yieldPositionRepository.save(position);
+
+        saveAuditLog(savedPosition.getId(), "YieldPosition", "YIELD_DEPOSIT_CREATED", null,
+                String.format("{\"status\":\"ACTIVE\",\"amount\":\"%s\",\"annualRate\":\"%s%%\",\"depositTxId\":\"%s\"}",
+                        request.amountEur(), ANNUAL_YIELD_RATE, savedTx.getId()),
                 userId);
 
-        log.info("[B2C-YIELD] Deposit SETTLED tx={} amount={}EUR", savedTx.getId(), request.amountEur());
+        log.info("[B2C-YIELD] Deposit SETTLED depositTx={} position={} amount={}EUR",
+                savedTx.getId(), savedPosition.getId(), request.amountEur());
 
-        BigDecimal dailyYield = request.amountEur()
-                .multiply(ANNUAL_RATE_DECIMAL)
-                .divide(DAYS_PER_YEAR, MathContext.DECIMAL64)
-                .setScale(6, RoundingMode.HALF_UP);
-        return new YieldPositionResponse(
-                savedTx.getId(),
-                request.amountEur(),
-                request.amountEur(),
-                dailyYield,
-                ANNUAL_YIELD_RATE,
-                STATUS_ACTIVE,
-                savedTx.getSettledAt()
-        );
+        return calculatePosition(savedPosition);
     }
+
+    // ── UC-18: Yield-Position abrufen ─────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public YieldPositionResponse getPosition(String customerId) {
         CustomerAccount account = accountRepository.findByCustomerId(customerId)
                 .orElseThrow(() -> new NoSuchElementException("Account not found for customer: " + customerId));
 
-        StablecoinTransaction tx = txRepository
-                .findTopByCustomerAccountIdAndTypeAndStatusOrderByCreatedAtDesc(
-                        account.getId(), TransactionType.YIELD_DEPOSIT, TransactionStatus.SETTLED)
+        YieldPosition position = yieldPositionRepository
+                .findByCustomerAccountIdAndStatus(account.getId(), YieldStatus.ACTIVE)
                 .orElseThrow(() -> new NoSuchElementException("No active yield position found for customer: " + customerId));
 
-        return calculatePosition(tx);
+        return calculatePosition(position);
     }
+
+    // ── UC-17: Yield-Position auflösen ────────────────────────────────────────
 
     @Transactional
-    public void redeem(UUID transactionId, String userId) {
-        StablecoinTransaction tx = txRepository.findById(transactionId)
-                .orElseThrow(() -> new NoSuchElementException("Yield position not found: " + transactionId));
+    public void redeem(UUID positionId, String userId) {
+        YieldPosition position = yieldPositionRepository.findById(positionId)
+                .orElseThrow(() -> new NoSuchElementException("Yield position not found: " + positionId));
 
-        if (tx.getType() != TransactionType.YIELD_DEPOSIT) {
-            throw new NoSuchElementException("Transaction is not a yield deposit: " + transactionId);
-        }
-        if (tx.getStatus() != TransactionStatus.SETTLED) {
-            throw new IllegalStateException("Yield position is not active (status=" + tx.getStatus() + ")");
+        if (position.getStatus() != YieldStatus.ACTIVE) {
+            throw new IllegalStateException("Yield position is not active (status=" + position.getStatus() + ")");
         }
 
-        long days = ChronoUnit.DAYS.between(tx.getSettledAt(), LocalDateTime.now());
-        BigDecimal currentValue = computeCurrentValue(tx.getAmountFiat(), days);
-        BigDecimal accrued = currentValue.subtract(tx.getAmountFiat()).setScale(6, RoundingMode.HALF_UP);
+        CustomerAccount account = position.getCustomerAccount();
+        long days = ChronoUnit.DAYS.between(position.getDepositedAt(), LocalDateTime.now());
+        BigDecimal currentValue = computeCurrentValue(position.getPrincipal(), days);
+        BigDecimal accrued = currentValue.subtract(position.getPrincipal()).setScale(6, RoundingMode.HALF_UP);
 
-        tx.setStatus(TransactionStatus.REDEEMED);
-        txRepository.save(tx);
+        // 1. Eigenständige YIELD_REDEEM Transaktion — sauberer Buchungsbeleg für die Auszahlung
+        StablecoinTransaction redeemTx = new StablecoinTransaction();
+        redeemTx.setIdempotencyKey("redeem-" + positionId);
+        redeemTx.setCustomerAccount(account);
+        redeemTx.setType(TransactionType.YIELD_REDEEM);
+        redeemTx.setCurrency(StablecoinCurrency.EURC);
+        redeemTx.setAmountFiat(currentValue);
+        redeemTx.setAmountStablecoin(currentValue.setScale(6, RoundingMode.HALF_UP));
+        redeemTx.setSourceWallet(RWA_FUND_WALLET);
+        redeemTx.setDestinationWallet(account.getWalletAddress());
+        redeemTx.setStatus(TransactionStatus.REDEEMED);
+        redeemTx.setSettledAt(LocalDateTime.now());
+        StablecoinTransaction savedRedeemTx = txRepository.save(redeemTx);
 
-        saveAuditLog(tx.getId(), "YIELD_REDEEMED",
-                String.format("{\"status\":\"SETTLED\",\"principal\":\"%s\"}", tx.getAmountFiat()),
-                String.format("{\"status\":\"REDEEMED\",\"accruedYield\":\"%s\",\"daysSinceDeposit\":%d}", accrued, days),
+        // 2. YieldPosition schließen
+        position.setStatus(YieldStatus.CLOSED);
+        position.setClosedAt(LocalDateTime.now());
+        yieldPositionRepository.save(position);
+
+        saveAuditLog(positionId, "YieldPosition", "YIELD_REDEEMED",
+                String.format("{\"status\":\"ACTIVE\",\"principal\":\"%s\"}", position.getPrincipal()),
+                String.format("{\"status\":\"CLOSED\",\"accruedYield\":\"%s\",\"daysSinceDeposit\":%d,\"redeemTxId\":\"%s\"}",
+                        accrued, days, savedRedeemTx.getId()),
                 userId);
 
-        log.info("[B2C-YIELD] Redeemed tx={} days={} accruedYield={}EUR", transactionId, days, accrued);
+        log.info("[B2C-YIELD] Redeemed position={} redeemTx={} days={} accruedYield={}EUR",
+                positionId, savedRedeemTx.getId(), days, accrued);
     }
 
-    private YieldPositionResponse calculatePosition(StablecoinTransaction tx) {
-        LocalDateTime depositedAt = tx.getSettledAt() != null ? tx.getSettledAt() : tx.getCreatedAt();
-        long days = ChronoUnit.DAYS.between(depositedAt, LocalDateTime.now());
-        BigDecimal principal = tx.getAmountFiat();
+    // ── Berechnung ────────────────────────────────────────────────────────────
+
+    private YieldPositionResponse calculatePosition(YieldPosition position) {
+        long days = ChronoUnit.DAYS.between(position.getDepositedAt(), LocalDateTime.now());
+        BigDecimal principal = position.getPrincipal();
         BigDecimal currentValue = computeCurrentValue(principal, days);
-        BigDecimal accrued = currentValue.subtract(principal).setScale(6, RoundingMode.HALF_UP);
 
         BigDecimal dailyYield = principal
-                .multiply(ANNUAL_RATE_DECIMAL)
+                .multiply(position.getInterestRate())
                 .divide(DAYS_PER_YEAR, MathContext.DECIMAL64)
                 .setScale(6, RoundingMode.HALF_UP);
 
         return new YieldPositionResponse(
-                tx.getId(),
+                position.getId(),
                 principal,
                 currentValue,
                 dailyYield,
                 ANNUAL_YIELD_RATE,
-                STATUS_ACTIVE,
-                depositedAt
+                position.getStatus().name(),
+                position.getDepositedAt()
         );
     }
 
-    private BigDecimal computeCurrentValue(BigDecimal principal, long days) {
-        // currentValue = principal * (1 + 0.035/365)^days  — using BigDecimal with DECIMAL64
+    // Zinseszins: principal × (1 + rate/365)^days — BigDecimal DECIMAL64 für Präzision
+    // package-private für Unit-Tests
+    public BigDecimal computeCurrentValue(BigDecimal principal, long days) {
         BigDecimal dailyRate = ANNUAL_RATE_DECIMAL.divide(DAYS_PER_YEAR, MathContext.DECIMAL64);
         BigDecimal factor = BigDecimal.ONE.add(dailyRate, MathContext.DECIMAL64)
                 .pow((int) Math.min(days, Integer.MAX_VALUE), MathContext.DECIMAL64);
         return principal.multiply(factor, MathContext.DECIMAL64).setScale(6, RoundingMode.HALF_UP);
     }
 
-    private void saveAuditLog(UUID entityId, String action, String previousState, String newState, String userId) {
+    private void saveAuditLog(UUID entityId, String entityType, String action,
+                              String previousState, String newState, String userId) {
         AuditLog entry = new AuditLog();
-        entry.setEntityType("StablecoinTransaction");
+        entry.setEntityType(entityType);
         entry.setEntityId(entityId);
         entry.setAction(action);
         entry.setPreviousState(previousState);

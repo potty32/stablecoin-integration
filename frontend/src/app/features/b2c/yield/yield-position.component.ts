@@ -227,7 +227,7 @@ export class YieldPositionComponent implements OnInit {
     this.redeemSubmitting = true;
     this.redeemError = null;
 
-    this.txService.redeemYield(this.position.depositId).subscribe({
+    this.txService.redeemYield(this.position.positionId).subscribe({
       next: () => {
         this.redeemSubmitting = false;
         this.showRedeemConfirm = false;

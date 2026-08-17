@@ -23,7 +23,7 @@ export interface AddressBookEntry {
 
 export interface TransactionResponse {
   transactionId: string;
-  type: 'OUTBOUND' | 'INBOUND' | 'BULK' | 'P2P' | 'REMITTANCE' | 'YIELD_DEPOSIT';
+  type: 'OUTBOUND' | 'INBOUND' | 'BULK' | 'P2P' | 'REMITTANCE' | 'YIELD_DEPOSIT' | 'YIELD_REDEEM';
   status: 'CREATED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXPIRED' |
           'COMPLIANCE_CHECKED' | 'FUNDS_HELD' | 'SUBMITTED' | 'SETTLED' | 'REDEEMED' | 'FAILED';
   amountFiat: number;
@@ -76,13 +76,13 @@ export interface RemittanceResponse {
 }
 
 export interface YieldPositionResponse {
-  depositId: string;
+  positionId: string;    // YieldPosition.id (war: depositId = TX.id)
   amountEur: number;
   depositDate: string;
   currentValueEur: number;
   dailyYieldEur: number;
   yieldRatePercent: number;
-  status: string;
+  status: string;        // YieldStatus: 'ACTIVE' | 'CLOSED'
 }
 
 export interface AccountBalanceResponse {
