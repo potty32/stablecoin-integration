@@ -1,6 +1,7 @@
 package de.atruvia.stablecoin.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -19,6 +20,13 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("[ACCESS DENIED] {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse("AUTH_001", ex.getMessage(), getTraceId()));
+    }
 
     @ExceptionHandler(ComplianceBlockException.class)
     public ResponseEntity<ErrorResponse> handleComplianceBlock(ComplianceBlockException ex, HttpServletRequest req) {

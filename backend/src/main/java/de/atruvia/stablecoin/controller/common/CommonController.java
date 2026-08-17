@@ -6,6 +6,7 @@ import de.atruvia.stablecoin.client.dto.CircleWalletBalanceDto;
 import de.atruvia.stablecoin.dto.response.AccountBalanceResponse;
 import de.atruvia.stablecoin.dto.response.TransactionResponse;
 import de.atruvia.stablecoin.entity.AuditLog;
+import de.atruvia.stablecoin.entity.CustomerAccount;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
 import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.repository.ApprovalWorkflowRepository;
@@ -15,6 +16,8 @@ import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import org.springframework.security.access.AccessDeniedException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -58,8 +61,11 @@ public class CommonController {
     public ResponseEntity<AccountBalanceResponse> getBalance(
             @PathVariable String iban,
             Authentication auth) {
-        accountRepository.findByIban(iban)
-                .orElseThrow(() -> new NoSuchElementException("Account not found: " + iban));
+        CustomerAccount requestingAccount = accountRepository.findByCustomerId(auth.getName())
+                .orElseThrow(() -> new NoSuchElementException("No account for user: " + auth.getName()));
+        if (!requestingAccount.getIban().equals(iban)) {
+            throw new AccessDeniedException("Access denied to account: " + iban);
+        }
 
         var fiatBalance = coreBankingClient.getAccountBalance(iban);
 
@@ -78,6 +84,12 @@ public class CommonController {
             Authentication auth) {
         StablecoinTransaction tx = txRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Transaction not found: " + id));
+
+        CustomerAccount requestingAccount = accountRepository.findByCustomerId(auth.getName())
+                .orElseThrow(() -> new NoSuchElementException("No account for user: " + auth.getName()));
+        if (!tx.getCustomerAccount().getId().equals(requestingAccount.getId())) {
+            throw new AccessDeniedException("Access denied to transaction: " + id);
+        }
 
         boolean requiresApproval = approvalRepository.findByTransactionId(id).isPresent();
 

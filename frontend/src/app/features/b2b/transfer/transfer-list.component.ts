@@ -1,17 +1,19 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, KeyValuePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import {
   TransactionService,
   TransactionResponse,
-  TransferPageResponse
+  TransferPageResponse,
+  AccountBalanceResponse
 } from '../../../core/services/transaction.service';
+import { AuthService } from '../../../core/services/auth.service';
 
 @Component({
   selector: 'app-transfer-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, KeyValuePipe],
   template: `
     <div>
       <!-- Header -->
@@ -22,6 +24,23 @@ import {
           + Neue Überweisung
         </a>
       </div>
+
+      <!-- Balance Widget -->
+      @if (balance) {
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:0.875rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:2rem">
+          <div>
+            <div style="font-size:0.7rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.2rem">Verfügbares Guthaben</div>
+            <div style="font-size:1.25rem;font-weight:700;color:#1e293b">{{ balance.balanceEur | number:'1.2-2' }} EUR</div>
+          </div>
+          @for (entry of balance.stablecoinBalances | keyvalue; track entry.key) {
+            <div>
+              <div style="font-size:0.7rem;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.2rem">{{ entry.key }}</div>
+              <div style="font-size:1.25rem;font-weight:700;color:#2563eb">{{ entry.value }}</div>
+            </div>
+          }
+          <div style="font-size:0.75rem;color:#94a3b8;font-family:monospace;margin-left:auto">{{ balance.iban }}</div>
+        </div>
+      }
 
       <!-- Filter row -->
       <div style="display:flex;gap:1rem;margin-bottom:1rem;align-items:center">
@@ -141,7 +160,9 @@ import {
 })
 export class TransferListComponent implements OnInit {
   private readonly txService = inject(TransactionService);
+  private readonly auth     = inject(AuthService);
 
+  balance: AccountBalanceResponse | null = null;
   transactions: TransactionResponse[] = [];
   loading = false;
   error = '';
@@ -155,6 +176,13 @@ export class TransferListComponent implements OnInit {
   selectedStatus = '';
 
   ngOnInit(): void {
+    const iban = this.auth.getIban();
+    if (iban) {
+      this.txService.getAccountBalance(iban).subscribe({
+        next: b  => this.balance = b,
+        error: () => {}
+      });
+    }
     this.load();
   }
 

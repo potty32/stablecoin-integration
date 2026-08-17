@@ -1,0 +1,18 @@
+app:
+  security:
+    dev-mode: true
+  revenue:
+    fx-spread: 0.0015
+    fee-b2b: 2.50
+    fee-b2c: 0.50
+    gas-cost-simulated: 0.008
+  rate-quote:
+    validity-seconds: 60
+
+management:
+  otlp:
+    tracing:
+      endpoint: ""
+  tracing:
+    sampling:
+      probability: 0.0

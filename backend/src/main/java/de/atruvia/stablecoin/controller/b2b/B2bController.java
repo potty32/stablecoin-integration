@@ -10,10 +10,13 @@ import de.atruvia.stablecoin.dto.response.TransactionResponse;
 import de.atruvia.stablecoin.dto.response.TransferPageResponse;
 import de.atruvia.stablecoin.entity.StablecoinCurrency;
 import de.atruvia.stablecoin.entity.TransactionStatus;
+import de.atruvia.stablecoin.dto.request.b2b.AddInstitutionalAddressRequest;
+import de.atruvia.stablecoin.dto.response.InstitutionalAddressBookResponse;
 import de.atruvia.stablecoin.service.b2b.AddressBookService;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
 import de.atruvia.stablecoin.service.b2b.BulkPaymentService;
 import de.atruvia.stablecoin.service.b2b.ExportService;
+import de.atruvia.stablecoin.service.b2b.InstitutionalAddressBookService;
 import de.atruvia.stablecoin.service.b2b.SanctionsBatchService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -42,17 +45,20 @@ public class B2bController {
     private final BulkPaymentService bulkPaymentService;
     private final ExportService exportService;
     private final SanctionsBatchService sanctionsBatchService;
+    private final InstitutionalAddressBookService institutionalAddressBookService;
 
     public B2bController(B2bTransferService transferService,
                          AddressBookService addressBookService,
                          BulkPaymentService bulkPaymentService,
                          ExportService exportService,
-                         SanctionsBatchService sanctionsBatchService) {
-        this.transferService      = transferService;
-        this.addressBookService   = addressBookService;
-        this.bulkPaymentService   = bulkPaymentService;
-        this.exportService        = exportService;
-        this.sanctionsBatchService = sanctionsBatchService;
+                         SanctionsBatchService sanctionsBatchService,
+                         InstitutionalAddressBookService institutionalAddressBookService) {
+        this.transferService                = transferService;
+        this.addressBookService             = addressBookService;
+        this.bulkPaymentService             = bulkPaymentService;
+        this.exportService                  = exportService;
+        this.sanctionsBatchService          = sanctionsBatchService;
+        this.institutionalAddressBookService = institutionalAddressBookService;
     }
 
     // ─── Transfer endpoints ───────────────────────────────────────────────────
@@ -193,5 +199,26 @@ public class B2bController {
     public ResponseEntity<String> triggerSanctionsScan(Authentication auth) {
         sanctionsBatchService.runNightlySanctionsScan();
         return ResponseEntity.ok("{\"message\":\"Sanctions scan completed\"}");
+    }
+
+    @PostMapping("/institutional-address-book")
+    public ResponseEntity<InstitutionalAddressBookResponse> addInstitutionalAddress(
+            @RequestBody @Valid AddInstitutionalAddressRequest request,
+            Authentication auth) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(institutionalAddressBookService.addAddress(request, auth.getName()));
+    }
+
+    @GetMapping("/institutional-address-book")
+    public ResponseEntity<List<InstitutionalAddressBookResponse>> listInstitutionalAddresses(Authentication auth) {
+        return ResponseEntity.ok(institutionalAddressBookService.listAddresses());
+    }
+
+    @DeleteMapping("/institutional-address-book/{id}")
+    public ResponseEntity<Void> revokeInstitutionalAddress(
+            @PathVariable UUID id,
+            Authentication auth) {
+        institutionalAddressBookService.revokeAddress(id, auth.getName());
+        return ResponseEntity.noContent().build();
     }
 }

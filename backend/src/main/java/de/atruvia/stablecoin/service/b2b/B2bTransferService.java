@@ -12,6 +12,8 @@ import de.atruvia.stablecoin.dto.response.TransactionResponse;
 import de.atruvia.stablecoin.dto.response.TransferPageResponse;
 import de.atruvia.stablecoin.entity.*;
 import de.atruvia.stablecoin.entity.AddressStatus;
+import de.atruvia.stablecoin.entity.InstitutionalAddressStatus;
+import de.atruvia.stablecoin.repository.InstitutionalAddressBookRepository;
 import de.atruvia.stablecoin.exception.ComplianceBlockException;
 import de.atruvia.stablecoin.exception.IdempotencyConflictException;
 import de.atruvia.stablecoin.exception.TaurusLimitExceededException;
@@ -75,6 +77,7 @@ public class B2bTransferService {
     private final TaurusCustodyClient taurusCustodyClient;
     private final N8nWebhookClient n8nWebhookClient;
     private final AddressBookRepository addressBookRepository;
+    private final InstitutionalAddressBookRepository institutionalAddressBookRepository;
 
     public B2bTransferService(
             StablecoinTransactionRepository txRepository,
@@ -90,6 +93,7 @@ public class B2bTransferService {
             TaurusCustodyClient taurusCustodyClient,
             N8nWebhookClient n8nWebhookClient,
             AddressBookRepository addressBookRepository,
+            InstitutionalAddressBookRepository institutionalAddressBookRepository,
             FxRateService fxRateService) {
         this.txRepository = txRepository;
         this.accountRepository = accountRepository;
@@ -104,6 +108,7 @@ public class B2bTransferService {
         this.taurusCustodyClient = taurusCustodyClient;
         this.n8nWebhookClient = n8nWebhookClient;
         this.addressBookRepository = addressBookRepository;
+        this.institutionalAddressBookRepository = institutionalAddressBookRepository;
         this.fxRateService = fxRateService;
     }
 
@@ -208,15 +213,19 @@ public class B2bTransferService {
         CustomerAccount account = accountRepository.findByIban(request.sourceIban())
                 .orElseThrow(() -> new NoSuchElementException("Account not found: " + request.sourceIban()));
 
-        // Whitelist-Check: Zieladresse muss ACTIVE im Adressbuch des Kunden stehen (MiCA / FATF Travel Rule)
-        addressBookRepository
+        // Whitelist-Check: Zieladresse muss ACTIVE in Kunden- ODER institutioneller Whitelist stehen (MiCA/FATF)
+        boolean inCustomerWhitelist = addressBookRepository
                 .findByCustomerAccountIdAndWalletAddressAndStatus(
                         account.getId(), request.destinationWallet(), AddressStatus.ACTIVE)
-                .orElseThrow(() -> {
-                    log.warn("[B2B] Whitelist block: wallet={} account={}",
-                            request.destinationWallet(), account.getCustomerId());
-                    return new ComplianceBlockException(request.destinationWallet(), "NOT_WHITELISTED");
-                });
+                .isPresent();
+        boolean inInstitutionalWhitelist = institutionalAddressBookRepository
+                .findByWalletAddressAndStatus(request.destinationWallet(), InstitutionalAddressStatus.ACTIVE)
+                .isPresent();
+        if (!inCustomerWhitelist && !inInstitutionalWhitelist) {
+            log.warn("[B2B] Whitelist block: wallet={} account={}",
+                    request.destinationWallet(), account.getCustomerId());
+            throw new ComplianceBlockException(request.destinationWallet(), "NOT_WHITELISTED");
+        }
 
         BigDecimal baseRate = fxRateService.getBaseRate(request.currency());
         BigDecimal effectiveRate = baseRate.add(baseRate.multiply(fxSpread));
