@@ -56,7 +56,7 @@ import {
                   {{ tx.transactionId.substring(0, 8) }}…
                 </span>
                 <span style="background:#ffedd5;color:#c2410c;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:600">
-                  AWAITING_APPROVAL
+                  PENDING_APPROVAL
                 </span>
               </div>
               <div style="font-size:1.5rem;font-weight:700;margin-bottom:0.25rem">
@@ -114,7 +114,7 @@ export class ApprovalDashboardComponent implements OnInit {
     this.loading = true;
     this.error = '';
     this.actionErrors = {};
-    this.txService.listB2bTransfers(0, 50, 'AWAITING_APPROVAL').subscribe({
+    this.txService.listB2bTransfers(0, 50, 'PENDING_APPROVAL').subscribe({
       next: page => {
         this.pending = page.content;
         this.loading = false;

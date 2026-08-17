@@ -48,9 +48,16 @@ import { AuthService } from '../../../core/services/auth.service';
         <select [(ngModel)]="selectedStatus" (ngModelChange)="onStatusChange($event)"
                 style="border:1px solid #d1d5db;border-radius:6px;padding:0.375rem 0.75rem;font-size:0.875rem;background:white">
           <option value="">Alle</option>
-          <option value="PENDING">PENDING</option>
-          <option value="AWAITING_APPROVAL">AWAITING_APPROVAL</option>
+          <option value="CREATED">CREATED</option>
+          <option value="PENDING_APPROVAL">PENDING_APPROVAL</option>
+          <option value="APPROVED">APPROVED</option>
+          <option value="COMPLIANCE_CHECKED">COMPLIANCE_CHECKED</option>
+          <option value="FUNDS_HELD">FUNDS_HELD</option>
+          <option value="SUBMITTED">SUBMITTED</option>
           <option value="SETTLED">SETTLED</option>
+          <option value="REJECTED">REJECTED</option>
+          <option value="EXPIRED">EXPIRED</option>
+          <option value="REDEEMED">REDEEMED</option>
           <option value="FAILED">FAILED</option>
         </select>
         <span style="font-size:0.8rem;color:#6b7280" *ngIf="!loading">
@@ -98,7 +105,7 @@ import { AuthService } from '../../../core/services/auth.service';
               <td style="padding:0.75rem 1rem;color:#475569">{{ tx.currency }}</td>
               <td style="padding:0.75rem 1rem">
                 <span [style]="statusStyle(tx.status)">{{ tx.status }}</span>
-                <span *ngIf="tx.requiresApproval && tx.status === 'AWAITING_APPROVAL'"
+                <span *ngIf="tx.requiresApproval && tx.status === 'PENDING_APPROVAL'"
                       style="margin-left:6px;font-size:0.7rem;color:#d97706">⏳ Freigabe</span>
               </td>
               <td style="padding:0.75rem 1rem;color:#059669;font-weight:500">
@@ -108,7 +115,7 @@ import { AuthService } from '../../../core/services/auth.service';
                 {{ tx.createdAt | date:'dd.MM.yyyy HH:mm' }}
               </td>
               <td style="padding:0.75rem 1rem">
-                <ng-container *ngIf="tx.status === 'AWAITING_APPROVAL'">
+                <ng-container *ngIf="tx.status === 'PENDING_APPROVAL'">
                   <button (click)="approve(tx.transactionId)"
                           style="background:#16a34a;color:white;border:none;padding:0.3rem 0.75rem;border-radius:4px;font-size:0.8rem;cursor:pointer;margin-right:0.5rem;font-weight:500">
                     ✓ Freigeben
@@ -260,13 +267,17 @@ export class TransferListComponent implements OnInit {
   statusStyle(status: string): string {
     const base = 'display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:600;';
     const map: Record<string, string> = {
-      SETTLED: base + 'background:#dcfce7;color:#166534',
-      PENDING: base + 'background:#fef9c3;color:#854d0e',
-      PROCESSING: base + 'background:#dbeafe;color:#1d4ed8',
-      COMPLIANCE_CHECK: base + 'background:#ede9fe;color:#6d28d9',
-      AWAITING_APPROVAL: base + 'background:#ffedd5;color:#c2410c',
-      FAILED: base + 'background:#fee2e2;color:#b91c1c',
-      BLOCKED: base + 'background:#fce7f3;color:#9d174d',
+      CREATED:            base + 'background:#f1f5f9;color:#475569',
+      PENDING_APPROVAL:   base + 'background:#ffedd5;color:#c2410c',
+      APPROVED:           base + 'background:#dbeafe;color:#1d4ed8',
+      REJECTED:           base + 'background:#fee2e2;color:#b91c1c',
+      EXPIRED:            base + 'background:#f3f4f6;color:#6b7280',
+      COMPLIANCE_CHECKED: base + 'background:#ede9fe;color:#6d28d9',
+      FUNDS_HELD:         base + 'background:#fef3c7;color:#92400e',
+      SUBMITTED:          base + 'background:#dbeafe;color:#1d4ed8',
+      SETTLED:            base + 'background:#dcfce7;color:#166534',
+      REDEEMED:           base + 'background:#d1fae5;color:#065f46',
+      FAILED:             base + 'background:#fee2e2;color:#b91c1c',
     };
     return map[status] ?? base + 'background:#f1f5f9;color:#475569';
   }

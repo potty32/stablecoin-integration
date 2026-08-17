@@ -116,12 +116,12 @@ public class B2cYieldService {
         BigDecimal currentValue = computeCurrentValue(tx.getAmountFiat(), days);
         BigDecimal accrued = currentValue.subtract(tx.getAmountFiat()).setScale(6, RoundingMode.HALF_UP);
 
-        tx.setStatus(TransactionStatus.FAILED);
+        tx.setStatus(TransactionStatus.REDEEMED);
         txRepository.save(tx);
 
         saveAuditLog(tx.getId(), "YIELD_REDEEMED",
                 String.format("{\"status\":\"SETTLED\",\"principal\":\"%s\"}", tx.getAmountFiat()),
-                String.format("{\"status\":\"FAILED\",\"accruedYield\":\"%s\",\"daysSinceDeposit\":%d}", accrued, days),
+                String.format("{\"status\":\"REDEEMED\",\"accruedYield\":\"%s\",\"daysSinceDeposit\":%d}", accrued, days),
                 userId);
 
         log.info("[B2C-YIELD] Redeemed tx={} days={} accruedYield={}EUR", transactionId, days, accrued);

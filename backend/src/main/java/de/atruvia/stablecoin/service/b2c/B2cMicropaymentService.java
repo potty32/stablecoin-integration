@@ -78,7 +78,7 @@ public class B2cMicropaymentService {
         tx.setSourceWallet(account.getWalletAddress());
         tx.setDestinationWallet(merchantWallet);
         tx.setTransactionFee(MICROPAYMENT_FEE);
-        tx.setStatus(TransactionStatus.PROCESSING);
+        tx.setStatus(TransactionStatus.SUBMITTED);
         StablecoinTransaction savedTx = txRepository.save(tx);
 
         CircleTransferResponseDto circleResponse = circleWalletClient.initiateTransfer(

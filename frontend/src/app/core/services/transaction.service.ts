@@ -24,7 +24,8 @@ export interface AddressBookEntry {
 export interface TransactionResponse {
   transactionId: string;
   type: 'OUTBOUND' | 'INBOUND' | 'BULK' | 'P2P' | 'REMITTANCE' | 'YIELD_DEPOSIT';
-  status: 'PENDING' | 'AWAITING_APPROVAL' | 'COMPLIANCE_CHECK' | 'PROCESSING' | 'SETTLED' | 'FAILED' | 'BLOCKED';
+  status: 'CREATED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXPIRED' |
+          'COMPLIANCE_CHECKED' | 'FUNDS_HELD' | 'SUBMITTED' | 'SETTLED' | 'REDEEMED' | 'FAILED';
   amountFiat: number;
   amountStablecoin: number;
   currency: 'USDC' | 'EURC';

@@ -6,6 +6,8 @@ import de.atruvia.stablecoin.client.dto.BookingResponseDto;
 import de.atruvia.stablecoin.client.dto.CreateHoldDto;
 import de.atruvia.stablecoin.client.dto.HoldResponseDto;
 import de.atruvia.stablecoin.client.dto.LedgerBookingDto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +19,8 @@ import java.util.UUID;
 @Service
 @Profile("dev")
 public class MockCoreBankingClient implements CoreBankingClient {
+
+    private static final Logger log = LoggerFactory.getLogger(MockCoreBankingClient.class);
 
     private static final Map<String, BigDecimal> BALANCES = Map.of(
             "DE89370400440532013000", new BigDecimal("250000.00"),
@@ -33,6 +37,11 @@ public class MockCoreBankingClient implements CoreBankingClient {
     public HoldResponseDto createHold(String iban, CreateHoldDto request) {
         String holdId = "hold-" + UUID.randomUUID().toString().substring(0, 8);
         return new HoldResponseDto(holdId, iban, request.amount(), "HELD", LocalDateTime.now().plusHours(2));
+    }
+
+    @Override
+    public void releaseHold(String holdId) {
+        log.info("[MOCK CoreBanking] Released hold={}", holdId);
     }
 
     @Override

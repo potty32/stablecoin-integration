@@ -65,6 +65,9 @@ public class StablecoinTransaction {
     @Column(name = "blockchain_hash", length = 100)
     private String blockchainHash;
 
+    @Column(name = "hold_id", length = 100)
+    private String holdId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 25)
     private TransactionStatus status;
@@ -85,7 +88,7 @@ public class StablecoinTransaction {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (status == null) status = TransactionStatus.PENDING;
+        if (status == null) status = TransactionStatus.CREATED;
     }
 
     @PreUpdate
@@ -127,6 +130,8 @@ public class StablecoinTransaction {
     public void setCircleTransactionId(String circleTransactionId) { this.circleTransactionId = circleTransactionId; }
     public String getBlockchainHash() { return blockchainHash; }
     public void setBlockchainHash(String blockchainHash) { this.blockchainHash = blockchainHash; }
+    public String getHoldId() { return holdId; }
+    public void setHoldId(String holdId) { this.holdId = holdId; }
     public TransactionStatus getStatus() { return status; }
     public void setStatus(TransactionStatus status) { this.status = status; }
     public String getFailureReason() { return failureReason; }

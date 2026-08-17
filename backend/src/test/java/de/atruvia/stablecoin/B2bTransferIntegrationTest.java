@@ -84,7 +84,7 @@ class B2bTransferIntegrationTest extends AbstractIntegrationTest {
         assertThat(txRepository.count()).isEqualTo(before);
     }
 
-    // TC3: Vier-Augen — > 25.000 EUR → AWAITING_APPROVAL → approve → SETTLED
+    // TC3: Vier-Augen — > 25.000 EUR → PENDING_APPROVAL → approve → SETTLED
     @Test
     void approvalWorkflow_aboveThreshold_approveThenSettles() {
         whitelistWallet(LOW_RISK_WALLET);
@@ -96,7 +96,7 @@ class B2bTransferIntegrationTest extends AbstractIntegrationTest {
                         new BigDecimal("50000"), StablecoinCurrency.USDC, null, null, "Bulk"),
                 "cust-b2b-001");
 
-        assertThat(pending.status()).isEqualTo(TransactionStatus.AWAITING_APPROVAL);
+        assertThat(pending.status()).isEqualTo(TransactionStatus.PENDING_APPROVAL);
 
         // Approve durch anderen User (dev-mode=true → self-approval erlaubt)
         TransactionResponse settled = transferService.approve(
@@ -129,6 +129,6 @@ class B2bTransferIntegrationTest extends AbstractIntegrationTest {
         // TX wurde geschrieben (PENDING) und dann BLOCKED gesetzt
         assertThat(txRepository.findAll())
                 .anyMatch(tx -> tx.getDestinationWallet().equals(DEAD_WALLET)
-                        && tx.getStatus() == TransactionStatus.BLOCKED);
+                        && tx.getStatus() == TransactionStatus.FAILED);
     }
 }

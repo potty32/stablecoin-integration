@@ -94,7 +94,7 @@ public class B2cRemittanceService {
         tx.setSourceWallet(account.getWalletAddress());
         tx.setDestinationWallet(REMITTANCE_GATEWAY_WALLET);
         tx.setTransactionFee(feeB2c);
-        tx.setStatus(TransactionStatus.PROCESSING);
+        tx.setStatus(TransactionStatus.SUBMITTED);
         StablecoinTransaction savedTx = txRepository.save(tx);
 
         CircleTransferResponseDto circleResponse = circleWalletClient.initiateTransfer(

@@ -100,7 +100,7 @@ public class B2cP2pService {
         tx.setSourceWallet(senderAccount.getWalletAddress());
         tx.setDestinationWallet(recipientAlias.getWalletAddress());
         tx.setTransactionFee(feeB2c);
-        tx.setStatus(TransactionStatus.PROCESSING);
+        tx.setStatus(TransactionStatus.SUBMITTED);
         StablecoinTransaction savedTx = txRepository.save(tx);
 
         CircleTransferResponseDto circleResponse = circleWalletClient.initiateTransfer(

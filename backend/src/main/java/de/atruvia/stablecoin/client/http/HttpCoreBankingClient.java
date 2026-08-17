@@ -58,6 +58,19 @@ public class HttpCoreBankingClient implements CoreBankingClient {
     }
 
     @Override
+    public void releaseHold(String holdId) {
+        restClient.delete()
+                .uri("/api/v1/holds/{holdId}", holdId)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (req, response) -> {
+                    byte[] body = response.getBody().readAllBytes();
+                    throw new RuntimeException(
+                            "Core Banking releaseHold error [" + response.getStatusCode() + "]: " + new String(body));
+                })
+                .toBodilessEntity();
+    }
+
+    @Override
     public BookingResponseDto createLedgerBooking(LedgerBookingDto request) {
         return restClient.post()
                 .uri("/api/v1/ledger/bookings")

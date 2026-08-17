@@ -539,7 +539,7 @@ BigDecimal currentValue = principal.multiply(factor, MathContext.DECIMAL64);
 
 **Summary**
 Privatkunde löst Yield-Position auf. Aufgelaufene Zinsen werden berechnet und geloggt.
-TX erhält Status `FAILED` als interner Redeem-Marker — danach verschwindet die Position.
+TX erhält Status `REDEEMED` — regulatorisch sauber (BaFin/IT-Audit: FAILED = Systemfehler, REDEEMED = Geschäftsvorfall).
 
 ```
 Client
@@ -551,8 +551,8 @@ B2cYieldService.redeem() [@Transactional]
   ├── days = ChronoUnit.DAYS.between(settledAt, now)
   ├── currentValue = principal × (1 + 0.035/365)^days
   ├── accrued = currentValue − principal
-  ├── DB: tx.status = FAILED (Redeem-Marker)
-  ├── DB: AuditLog YIELD_REDEEMED {principal, accruedYield, days}
+  ├── DB: tx.status = REDEEMED  ← regulatorisch korrekt (BaFin/IT-Audit konform)
+  ├── DB: AuditLog YIELD_REDEEMED {status:"REDEEMED", accruedYield, daysSinceDeposit}
   └── ← 204 No Content
 ```
 
@@ -562,10 +562,13 @@ B2cYieldService.redeem() [@Transactional]
 
 **Summary**
 Gibt aktuelle Yield-Position mit live berechneten Zinsen zurück (kein Cache).
+Die Abfrage berücksichtigt nur Transaktionen im Status `SETTLED` —
+`REDEEMED`, `FAILED` und alle anderen Zustände werden ignoriert.
 
 ```
 Client → B2cYieldService.getPosition() [readOnly]
-  ├── TxRepository.findFirstBy...YIELD_DEPOSIT + SETTLED → 404 wenn keine
+  ├── TxRepository.findFirstBy...YIELD_DEPOSIT + SETTLED → 404 wenn keine aktive Position
+  │     (REDEEMED-Positionen werden NICHT gefunden → korrekte Filterung)
   ├── days = now − depositedAt
   ├── currentValue = principal × (1 + 0.035/365)^days
   └── ← 200 YieldPositionResponse (live)
@@ -937,15 +940,108 @@ return ResponseEntity.ok(transferService.approve(id,
 
 Selbst-Genehmigung: `!devMode && initiatorId.equals(approverId)` → 400 BIZ_001.
 
-### 9. FAILED als Redeem-Marker (UC-17)
+### 9. REDEEMED als eigener terminaler Status (UC-17)
 
-`TransactionStatus.FAILED` für aufgelöste Yield-Positionen — absichtlich, da `getPosition()` nur SETTLED sucht. In HANDOVER.md dokumentiert.
+`TransactionStatus.REDEEMED` ist der regulatorisch korrekte Endzustand nach erfolgreicher
+Yield-Auflösung. `FAILED` bleibt ausschließlich echten Systemfehlern vorbehalten (BaFin/IT-Audit).
+`getPosition()` sucht nur nach `SETTLED` — REDEEMED-Positionen verschwinden damit automatisch.
+Die ursprüngliche Verwendung von `FAILED` als Redeem-Marker wurde im Zuge des State-Machine-Refactorings
+(Commit `refactor(state-machine)`) bereinigt.
 
 ### 10. Integrationstests (Testcontainers)
 
 5 Tests in `src/test/` mit `@Testcontainers(disabledWithoutDocker = true)`:
 TC1 Happy-Path | TC2 Whitelist-Block (kein TX) | TC3 Vier-Augen | TC4 Compliance-Block | TC5 Ownership-403.
 In Kasm-Umgebung ohne Docker: automatisch geskippt (kein Fehler).
+
+---
+
+---
+
+## State Machine — Transaktionslebenszyklus
+
+### Erlaubte Zustandsübergänge (11-Werte-Enum)
+
+```
+CREATED           → PENDING_APPROVAL, COMPLIANCE_CHECKED, FAILED
+PENDING_APPROVAL  → APPROVED, REJECTED, EXPIRED, FAILED
+APPROVED          → COMPLIANCE_CHECKED, FAILED
+COMPLIANCE_CHECKED→ FUNDS_HELD, FAILED
+FUNDS_HELD        → SUBMITTED, FAILED  ← FAILED hier: Auto-Hold-Release!
+SUBMITTED         → SETTLED, FAILED    ← FAILED hier: Auto-Hold-Release!
+SETTLED           → REDEEMED, FAILED
+
+REDEEMED, REJECTED, EXPIRED, FAILED  →  (terminal — keine weiteren Übergänge)
+```
+
+### Status-Semantik
+
+| Status | Bedeutung | Terminal | Hold-Release bei FAILED |
+|---|---|---|---|
+| `CREATED` | Transaktion initialisiert | Nein | Nein |
+| `PENDING_APPROVAL` | Wartet auf Vier-Augen-Freigabe | Nein | Nein |
+| `APPROVED` | Zweitfreigabe erteilt | Nein | Nein |
+| `REJECTED` | Zweitfreigabe abgelehnt | **Ja** | — |
+| `EXPIRED` | Freigabefrist abgelaufen | **Ja** | — |
+| `COMPLIANCE_CHECKED` | AML/Whitelist erfolgreich | Nein | Nein |
+| `FUNDS_HELD` | EUR-Betrag im Kernbanksystem gesperrt | Nein | **Ja** |
+| `SUBMITTED` | An Taurus/Circle/Blockchain übergeben | Nein | **Ja** |
+| `SETTLED` | Erfolgreich abgeschlossen und verbucht | Nein* | — |
+| `REDEEMED` | Yield-Anlage erfolgreich aufgelöst | **Ja** | — |
+| `FAILED` | Technischer/fachlicher Abbruch mit Rollback | **Ja** | — |
+
+*SETTLED → REDEEMED erlaubt (Yield-Redeem-Pfad)
+
+### Implementierung
+
+```java
+// Zentrale State-Machine-Methode (B2bTransferService)
+private static final Map<TransactionStatus, EnumSet<TransactionStatus>> ALLOWED =
+    Map.ofEntries(
+        entry(CREATED,            EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, FAILED)),
+        entry(PENDING_APPROVAL,   EnumSet.of(APPROVED, REJECTED, EXPIRED, FAILED)),
+        entry(APPROVED,           EnumSet.of(COMPLIANCE_CHECKED, FAILED)),
+        entry(COMPLIANCE_CHECKED, EnumSet.of(FUNDS_HELD, FAILED)),
+        entry(FUNDS_HELD,         EnumSet.of(SUBMITTED, FAILED)),
+        entry(SUBMITTED,          EnumSet.of(SETTLED, FAILED)),
+        entry(SETTLED,            EnumSet.of(REDEEMED, FAILED))
+    );
+
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void transitionTo(UUID txId, TransactionStatus targetStatus, String userId) {
+    StablecoinTransaction tx = txRepository.findByIdWithLock(txId).orElseThrow();
+    TransactionStatus current = tx.getStatus();
+
+    // Validierung: ungültige Übergänge werden mit IllegalStateException blockiert
+    EnumSet<TransactionStatus> allowed = ALLOWED.getOrDefault(current, EnumSet.noneOf(TransactionStatus.class));
+    if (!allowed.contains(targetStatus)) {
+        throw new IllegalStateException(
+            String.format("Ungültiger Statusübergang: %s → %s (erlaubt: %s)", current, targetStatus, allowed));
+    }
+
+    // Auto-Hold-Release: bei FAILED aus FUNDS_HELD oder SUBMITTED
+    if (targetStatus == FAILED && EnumSet.of(FUNDS_HELD, SUBMITTED).contains(current) && tx.getHoldId() != null) {
+        coreBankingClient.releaseHold(tx.getHoldId());
+    }
+
+    tx.setStatus(targetStatus);
+    txRepository.save(tx);
+    saveAuditLog(...);
+}
+```
+
+### Regulatorische Begründung (BaFin / IT-Audit)
+
+- **FAILED ≠ REDEEMED**: FAILED bedeutet ausschließlich technischer oder fachlicher Abbruch.
+  REDEEMED ist ein erfolgreicher Geschäftsvorfall. Prüfer können anhand des Status allein
+  erkennen was passiert ist — ohne Kommentare oder Sonderfälle.
+- **REJECTED ≠ FAILED**: Manuelle Ablehnung durch Mensch ist kein Systemfehler.
+  Wichtig für KPI-Auswertungen (Ablehnungsquote ≠ Fehlerquote).
+- **Ungültige Übergänge**: Laufzeit-Exception verhindert stille Datenverfälschung.
+  SETTLED → PENDING ist unmöglich.
+- **Auto-Hold-Release**: Systeminvariante garantiert dass nach jedem FAILED-Übergang aus
+  FUNDS_HELD oder SUBMITTED der EUR-Hold automatisch freigegeben wird.
+  Keine manuelle Disposition-Bereinigung nach Systemfehler nötig.
 
 ---
 

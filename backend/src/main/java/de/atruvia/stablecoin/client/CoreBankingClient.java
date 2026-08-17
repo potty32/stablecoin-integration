@@ -9,5 +9,6 @@ import de.atruvia.stablecoin.client.dto.LedgerBookingDto;
 public interface CoreBankingClient {
     AccountBalanceDto getAccountBalance(String iban);
     HoldResponseDto createHold(String iban, CreateHoldDto request);
+    void releaseHold(String holdId);
     BookingResponseDto createLedgerBooking(LedgerBookingDto request);
 }

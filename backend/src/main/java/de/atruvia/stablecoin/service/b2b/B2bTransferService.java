@@ -13,7 +13,6 @@ import de.atruvia.stablecoin.dto.response.TransferPageResponse;
 import de.atruvia.stablecoin.entity.*;
 import de.atruvia.stablecoin.entity.AddressStatus;
 import de.atruvia.stablecoin.entity.InstitutionalAddressStatus;
-import de.atruvia.stablecoin.repository.InstitutionalAddressBookRepository;
 import de.atruvia.stablecoin.exception.ComplianceBlockException;
 import de.atruvia.stablecoin.exception.IdempotencyConflictException;
 import de.atruvia.stablecoin.exception.TaurusLimitExceededException;
@@ -26,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,21 +36,32 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.UUID;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
+
+import static de.atruvia.stablecoin.entity.TransactionStatus.*;
+import static java.util.Map.entry;
 
 @Service
 public class B2bTransferService {
 
     private static final Logger log = LoggerFactory.getLogger(B2bTransferService.class);
+
+    // ── State Machine: erlaubte Zustandsübergänge ─────────────────────────────
+    // Terminale Zustände (REDEEMED, REJECTED, EXPIRED, FAILED) haben keinen Eintrag
+    // → getOrDefault liefert leere Menge → alle weiteren Übergänge blockiert
+    private static final Map<TransactionStatus, EnumSet<TransactionStatus>> ALLOWED =
+        Map.ofEntries(
+            entry(CREATED,            EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, FAILED)),
+            entry(PENDING_APPROVAL,   EnumSet.of(APPROVED, REJECTED, EXPIRED, FAILED)),
+            entry(APPROVED,           EnumSet.of(COMPLIANCE_CHECKED, FAILED)),
+            entry(COMPLIANCE_CHECKED, EnumSet.of(FUNDS_HELD, FAILED)),
+            entry(FUNDS_HELD,         EnumSet.of(SUBMITTED, FAILED)),
+            entry(SUBMITTED,          EnumSet.of(SETTLED, FAILED)),
+            entry(SETTLED,            EnumSet.of(REDEEMED, FAILED))
+        );
+
     private final FxRateService fxRateService;
 
     @Value("${app.revenue.fx-spread:0.0015}")
@@ -112,59 +125,44 @@ public class B2bTransferService {
         this.fxRateService = fxRateService;
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
-    //
-    // initiate() und approve() sind NICHT @Transactional.
-    // Alle DB-Schreiboperationen laufen in eigenen committed Transaktionen via self.,
-    // damit REQUIRES_NEW-Aufrufe in executeTransferFlow() die gespeicherten Daten lesen können.
+    // ── Public API ─────────────────────────────────────────────────────────────
 
     public TransactionResponse initiate(String idempotencyKey, InitiateTransferRequest request, String initiatorId) {
         txRepository.findByIdempotencyKey(idempotencyKey)
                 .ifPresent(ex -> { throw new IdempotencyConflictException(ex.getId()); });
 
-        // Schritt 1: TX + Outbox + Audit in eigener committed TX speichern
         InitResult init = self.persistInitialTransaction(idempotencyKey, request, initiatorId);
 
         if (init.requiresApproval()) {
             return init.response();
         }
 
-        // Schritt 2: TX ist jetzt committed und für REQUIRES_NEW sichtbar
         StablecoinTransaction tx = txRepository.findById(init.txId()).orElseThrow();
         return executeTransferFlow(tx, initiatorId);
     }
 
     public TransactionResponse approve(UUID transactionId, ApproveTransferRequest request) {
-        // Schritt 1: Approval committen (eigene TX)
         UUID txId = self.commitApproval(transactionId, request);
-
-        // Schritt 2: TX laden und Flow ausführen
         StablecoinTransaction tx = txRepository.findById(txId).orElseThrow();
         return executeTransferFlow(tx, request.approverId());
     }
 
-    @Transactional
     public TransactionResponse reject(UUID transactionId, ApproveTransferRequest request) {
         ApprovalWorkflow workflow = approvalRepository.findByTransactionId(transactionId)
                 .orElseThrow(() -> new NoSuchElementException("Approval workflow not found: " + transactionId));
+
         if (workflow.getStatus() != ApprovalStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Not pending approval: " + workflow.getStatus());
         }
         if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
             throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
         }
-        workflow.setStatus(ApprovalStatus.REJECTED);
-        approvalRepository.save(workflow);
 
-        StablecoinTransaction tx = workflow.getTransaction();
-        tx.setStatus(TransactionStatus.FAILED);
-        tx.setFailureReason("Rejected by: " + request.approverId());
-        txRepository.save(tx);
+        UUID txId = workflow.getTransaction().getId();
+        self.commitWorkflowRejection(transactionId, request.approverId());
+        self.transitionToRejected(txId, "Rejected by: " + request.approverId(), request.approverId());
 
-        saveAuditLog("StablecoinTransaction", tx.getId(), "REJECTED",
-                "{\"status\":\"AWAITING_APPROVAL\"}",
-                String.format("{\"status\":\"FAILED\",\"rejectedBy\":\"%s\"}", request.approverId()),
-                request.approverId());
+        StablecoinTransaction tx = txRepository.findById(txId).orElseThrow();
         return toResponse(tx, false);
     }
 
@@ -204,6 +202,109 @@ public class B2bTransferService {
         );
     }
 
+    // ── State Machine — zentrale, thread-sichere Methode ─────────────────────
+    // Alle REQUIRES_NEW-Methoden müssen via self. aufgerufen werden (Spring AOP Proxy)
+
+    /**
+     * Zentrale State-Machine-Methode. Validiert den Zustandsübergang und blockiert
+     * ungültige Übergänge mit IllegalStateException. Bei Übergang nach FAILED aus
+     * FUNDS_HELD oder SUBMITTED wird der Hold automatisch freigegeben (Auto-Rollback).
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void transitionTo(UUID txId, TransactionStatus targetStatus, String userId) {
+        StablecoinTransaction tx = txRepository.findByIdWithLock(txId)
+                .orElseThrow(() -> new NoSuchElementException("TX not found: " + txId));
+        TransactionStatus current = tx.getStatus();
+        validateTransition(current, targetStatus);
+
+        if (targetStatus == FAILED &&
+                EnumSet.of(FUNDS_HELD, SUBMITTED).contains(current) &&
+                tx.getHoldId() != null) {
+            coreBankingClient.releaseHold(tx.getHoldId());
+            log.warn("[STATE-MACHINE] Auto-released hold={} on FAILED from {}", tx.getHoldId(), current);
+        }
+
+        tx.setStatus(targetStatus);
+        txRepository.save(tx);
+        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
+                String.format("{\"status\":\"%s\"}", current),
+                String.format("{\"status\":\"%s\"}", targetStatus), userId);
+        log.info("[STATE-MACHINE] tx={} {} → {}", txId, current, targetStatus);
+    }
+
+    /** Übergang nach FUNDS_HELD — speichert zusätzlich die holdId für späteren Auto-Release. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void transitionToFundsHeld(UUID txId, String holdId, String userId) {
+        StablecoinTransaction tx = txRepository.findByIdWithLock(txId)
+                .orElseThrow(() -> new NoSuchElementException("TX not found: " + txId));
+        validateTransition(tx.getStatus(), FUNDS_HELD);
+        tx.setStatus(FUNDS_HELD);
+        tx.setHoldId(holdId);
+        txRepository.save(tx);
+        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
+                String.format("{\"status\":\"%s\"}", COMPLIANCE_CHECKED),
+                "{\"status\":\"FUNDS_HELD\"}", userId);
+        log.info("[STATE-MACHINE] tx={} {} → FUNDS_HELD holdId={}", txId, COMPLIANCE_CHECKED, holdId);
+    }
+
+    /** Übergang nach FAILED — speichert Grund, löst Hold automatisch aus (wenn vorhanden). */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void transitionToFailed(UUID txId, String reason, String userId) {
+        StablecoinTransaction tx = txRepository.findByIdWithLock(txId)
+                .orElseThrow(() -> new NoSuchElementException("TX not found: " + txId));
+        TransactionStatus current = tx.getStatus();
+        validateTransition(current, FAILED);
+
+        if (EnumSet.of(FUNDS_HELD, SUBMITTED).contains(current) && tx.getHoldId() != null) {
+            coreBankingClient.releaseHold(tx.getHoldId());
+            log.warn("[STATE-MACHINE] Auto-released hold={} on FAILED from {}", tx.getHoldId(), current);
+        }
+
+        tx.setStatus(FAILED);
+        tx.setFailureReason(reason);
+        txRepository.save(tx);
+        saveOutboxMessage(txId, "TRANSACTION_FAILED", String.format("{\"reason\":\"%s\"}", reason));
+        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
+                String.format("{\"status\":\"%s\"}", current),
+                String.format("{\"status\":\"FAILED\",\"reason\":\"%s\"}", reason), userId);
+        log.warn("[STATE-MACHINE] tx={} {} → FAILED reason={}", txId, current, reason);
+    }
+
+    /** Übergang nach REJECTED — speichert Ablehnungsgrund. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void transitionToRejected(UUID txId, String reason, String userId) {
+        StablecoinTransaction tx = txRepository.findByIdWithLock(txId)
+                .orElseThrow(() -> new NoSuchElementException("TX not found: " + txId));
+        TransactionStatus current = tx.getStatus();
+        validateTransition(current, REJECTED);
+        tx.setStatus(REJECTED);
+        tx.setFailureReason(reason);
+        txRepository.save(tx);
+        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
+                String.format("{\"status\":\"%s\"}", current),
+                String.format("{\"status\":\"REJECTED\",\"reason\":\"%s\"}", reason), userId);
+        log.info("[STATE-MACHINE] tx={} {} → REJECTED reason={}", txId, current, reason);
+    }
+
+    /** Übergang nach SETTLED — speichert Blockchain-Hash und Revenue-Daten. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void settleTransaction(UUID txId, String blockchainHash, RevenueService.RevenueCalculation revenue) {
+        StablecoinTransaction tx = txRepository.findByIdWithLock(txId)
+                .orElseThrow(() -> new NoSuchElementException("TX not found: " + txId));
+        validateTransition(tx.getStatus(), SETTLED);
+        tx.setStatus(SETTLED);
+        tx.setBlockchainHash(blockchainHash);
+        tx.setSettledAt(LocalDateTime.now());
+        tx.setTransactionFee(revenue.transactionFee());
+        tx.setGasCost(revenue.gasCost());
+        tx.setGrossRevenue(revenue.grossRevenue());
+        txRepository.save(tx);
+        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
+                "{\"status\":\"SUBMITTED\"}",
+                String.format("{\"status\":\"SETTLED\",\"hash\":\"%s\"}", blockchainHash), "SYSTEM");
+        log.info("[STATE-MACHINE] tx={} SUBMITTED → SETTLED hash={}", txId, blockchainHash);
+    }
+
     // ── Committed Helper-Transaktionen ────────────────────────────────────────
 
     record InitResult(UUID txId, boolean requiresApproval, TransactionResponse response) {}
@@ -213,7 +314,7 @@ public class B2bTransferService {
         CustomerAccount account = accountRepository.findByIban(request.sourceIban())
                 .orElseThrow(() -> new NoSuchElementException("Account not found: " + request.sourceIban()));
 
-        // Whitelist-Check: Zieladresse muss ACTIVE in Kunden- ODER institutioneller Whitelist stehen (MiCA/FATF)
+        // Whitelist-Check: Kunden-Adressbuch ODER institutionelle Whitelist (MiCA/FATF)
         boolean inCustomerWhitelist = addressBookRepository
                 .findByCustomerAccountIdAndWalletAddressAndStatus(
                         account.getId(), request.destinationWallet(), AddressStatus.ACTIVE)
@@ -222,8 +323,7 @@ public class B2bTransferService {
                 .findByWalletAddressAndStatus(request.destinationWallet(), InstitutionalAddressStatus.ACTIVE)
                 .isPresent();
         if (!inCustomerWhitelist && !inInstitutionalWhitelist) {
-            log.warn("[B2B] Whitelist block: wallet={} account={}",
-                    request.destinationWallet(), account.getCustomerId());
+            log.warn("[B2B] Whitelist block: wallet={} account={}", request.destinationWallet(), account.getCustomerId());
             throw new ComplianceBlockException(request.destinationWallet(), "NOT_WHITELISTED");
         }
 
@@ -253,13 +353,13 @@ public class B2bTransferService {
         tx.setFxSpread(fxSpread);
         tx.setDestinationWallet(request.destinationWallet());
         tx.setSourceWallet(account.getWalletAddress());
-        tx.setStatus(TransactionStatus.PENDING);
+        // Status wird via @PrePersist auf CREATED gesetzt
         StablecoinTransaction savedTx = txRepository.save(tx);
 
         saveOutboxMessage(savedTx.getId(), "TRANSACTION_INITIATED",
                 String.format("{\"amount\":\"%s\",\"currency\":\"%s\"}", request.amountEur(), request.currency()));
         saveAuditLog("StablecoinTransaction", savedTx.getId(), "CREATED", null,
-                String.format("{\"status\":\"PENDING\",\"amount\":\"%s\"}", request.amountEur()), initiatorId);
+                String.format("{\"status\":\"CREATED\",\"amount\":\"%s\"}", request.amountEur()), initiatorId);
 
         boolean requiresApproval = request.amountEur().compareTo(account.getTxLimitSingle()) > 0;
         if (requiresApproval) {
@@ -268,11 +368,12 @@ public class B2bTransferService {
             workflow.setInitiatorId(initiatorId);
             workflow.setExpiresAt(LocalDateTime.now().plusHours(24));
             approvalRepository.save(workflow);
-            savedTx.setStatus(TransactionStatus.AWAITING_APPROVAL);
+            savedTx.setStatus(PENDING_APPROVAL);
             txRepository.save(savedTx);
-            saveAuditLog("StablecoinTransaction", savedTx.getId(), "APPROVAL_REQUIRED",
-                    "{\"status\":\"PENDING\"}", "{\"status\":\"AWAITING_APPROVAL\"}", initiatorId);
-            log.info("[B2B] tx={} AWAITING_APPROVAL ({}EUR > limit {}EUR)", savedTx.getId(), request.amountEur(), account.getTxLimitSingle());
+            saveAuditLog("StablecoinTransaction", savedTx.getId(), "TRANSITION",
+                    "{\"status\":\"CREATED\"}", "{\"status\":\"PENDING_APPROVAL\"}", initiatorId);
+            log.info("[B2B] tx={} PENDING_APPROVAL ({}EUR > limit {}EUR)",
+                    savedTx.getId(), request.amountEur(), account.getTxLimitSingle());
         }
         return new InitResult(savedTx.getId(), requiresApproval, toResponse(savedTx, requiresApproval));
     }
@@ -281,44 +382,67 @@ public class B2bTransferService {
     public UUID commitApproval(UUID transactionId, ApproveTransferRequest request) {
         ApprovalWorkflow workflow = approvalRepository.findByTransactionId(transactionId)
                 .orElseThrow(() -> new NoSuchElementException("Approval workflow not found: " + transactionId));
+
         if (workflow.getStatus() != ApprovalStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Not pending: " + workflow.getStatus());
-        }
-        if (workflow.getExpiresAt().isBefore(LocalDateTime.now())) {
-            workflow.setStatus(ApprovalStatus.EXPIRED);
-            approvalRepository.save(workflow);
-            throw new IllegalStateException("Approval window expired");
         }
         if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
             throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
         }
+
+        if (workflow.getExpiresAt().isBefore(LocalDateTime.now())) {
+            // REQUIRES_NEW: committed auch wenn äußere TX rollt zurück
+            self.markWorkflowExpired(transactionId);
+            self.transitionTo(workflow.getTransaction().getId(), EXPIRED, request.approverId());
+            throw new IllegalStateException("Approval window expired");
+        }
+
         workflow.setApproverId(request.approverId());
         workflow.setStatus(ApprovalStatus.APPROVED);
         workflow.setApprovedAt(LocalDateTime.now());
         approvalRepository.save(workflow);
 
-        StablecoinTransaction tx = workflow.getTransaction();
-        saveAuditLog("StablecoinTransaction", tx.getId(), "APPROVED",
-                "{\"status\":\"AWAITING_APPROVAL\"}",
-                String.format("{\"status\":\"APPROVED\",\"approver\":\"%s\"}", request.approverId()),
-                request.approverId());
-        log.info("[B2B] tx={} approved by {}", tx.getId(), request.approverId());
-        return tx.getId();
+        UUID txId = workflow.getTransaction().getId();
+        self.transitionTo(txId, APPROVED, request.approverId());
+        log.info("[B2B] tx={} approved by {}", txId, request.approverId());
+        return txId;
     }
 
-    // ── Kern-Orchestration (keine eigene TX — REQUIRES_NEW-Calls via self.) ──
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markWorkflowExpired(UUID transactionId) {
+        ApprovalWorkflow workflow = approvalRepository.findByTransactionId(transactionId).orElseThrow();
+        workflow.setStatus(ApprovalStatus.EXPIRED);
+        approvalRepository.save(workflow);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void commitWorkflowRejection(UUID transactionId, String approverId) {
+        ApprovalWorkflow workflow = approvalRepository.findByTransactionId(transactionId).orElseThrow();
+        workflow.setStatus(ApprovalStatus.REJECTED);
+        workflow.setApproverId(approverId);
+        approvalRepository.save(workflow);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void persistCircleId(UUID txId, String circleId) {
+        txRepository.findById(txId).ifPresent(tx -> {
+            tx.setCircleTransactionId(circleId);
+            txRepository.save(tx);
+        });
+    }
+
+    // ── Kern-Orchestration ────────────────────────────────────────────────────
 
     private TransactionResponse executeTransferFlow(StablecoinTransaction tx, String userId) {
         UUID txId = tx.getId();
         try {
-            self.updateStatus(txId, TransactionStatus.COMPLIANCE_CHECK, userId);
+            self.transitionTo(txId, COMPLIANCE_CHECKED, userId);
             complianceService.screenAndAssert(tx.getDestinationWallet(), txId, userId);
-
-            self.updateStatus(txId, TransactionStatus.PROCESSING, userId);
 
             HoldResponseDto hold = coreBankingClient.createHold(
                     tx.getCustomerAccount().getIban(),
                     new CreateHoldDto(tx.getAmountFiat(), "EUR", "STABLECOIN_OUTBOUND", txId.toString()));
+            self.transitionToFundsHeld(txId, hold.holdId(), userId);
             log.info("[B2B] hold={} tx={}", hold.holdId(), txId);
 
             TaurusTransactionResponseDto taurus = taurusCustodyClient.signAndSubmit(
@@ -329,6 +453,8 @@ public class B2bTransferService {
                             tx.getAmountStablecoin().toPlainString(),
                             new TaurusTransactionRequestDto.Metadata(txId.toString(), tx.getCustomerAccount().getCustomerId())));
             log.info("[B2B] taurus={} tx={}", taurus.id(), txId);
+
+            self.transitionTo(txId, SUBMITTED, userId);
 
             CircleTransferResponseDto circleInit = circleWalletClient.initiateTransfer(
                     new CircleTransferRequestDto(
@@ -366,84 +492,28 @@ public class B2bTransferService {
             return toResponse(result, false);
 
         } catch (ComplianceBlockException e) {
-            self.markBlocked(txId, "COMPLIANCE_BLOCK: " + e.getMessage(), userId);
+            self.transitionToFailed(txId, "COMPLIANCE_BLOCK: " + e.getMessage(), userId);
             throw e;
         } catch (TaurusLimitExceededException e) {
-            self.markFailed(txId, "TAURUS_LIMIT: " + e.getMessage(), userId);
+            self.transitionToFailed(txId, "TAURUS_LIMIT: " + e.getMessage(), userId);
             throw e;
         } catch (Exception e) {
             log.error("[B2B] Transfer failed tx={}: {}", txId, e.getMessage(), e);
-            self.markFailed(txId, e.getMessage(), userId);
+            self.transitionToFailed(txId, e.getMessage(), userId);
             throw new IllegalStateException("Transfer failed: " + e.getMessage(), e);
         }
     }
 
-    // ── @Transactional(REQUIRES_NEW) Status-Updater ───────────────────────────
-    // Müssen via self. aufgerufen werden (Spring AOP Proxy-Requirement)
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void updateStatus(UUID txId, TransactionStatus newStatus, String userId) {
-        StablecoinTransaction tx = txRepository.findById(txId)
-                .orElseThrow(() -> new NoSuchElementException("TX not found for status update: " + txId));
-        TransactionStatus old = tx.getStatus();
-        tx.setStatus(newStatus);
-        txRepository.save(tx);
-        saveAuditLog("StablecoinTransaction", txId, "STATUS_CHANGED",
-                String.format("{\"status\":\"%s\"}", old),
-                String.format("{\"status\":\"%s\"}", newStatus), userId);
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void persistCircleId(UUID txId, String circleId) {
-        txRepository.findById(txId).ifPresent(tx -> {
-            tx.setCircleTransactionId(circleId);
-            txRepository.save(tx);
-        });
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void settleTransaction(UUID txId, String blockchainHash, RevenueService.RevenueCalculation revenue) {
-        txRepository.findById(txId).ifPresent(tx -> {
-            tx.setStatus(TransactionStatus.SETTLED);
-            tx.setBlockchainHash(blockchainHash);
-            tx.setSettledAt(LocalDateTime.now());
-            tx.setTransactionFee(revenue.transactionFee());
-            tx.setGasCost(revenue.gasCost());
-            tx.setGrossRevenue(revenue.grossRevenue());
-            txRepository.save(tx);
-        });
-        saveAuditLog("StablecoinTransaction", txId, "SETTLED",
-                "{\"status\":\"PROCESSING\"}",
-                String.format("{\"status\":\"SETTLED\",\"hash\":\"%s\"}", blockchainHash), "SYSTEM");
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markFailed(UUID txId, String reason, String userId) {
-        txRepository.findById(txId).ifPresent(tx -> {
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setFailureReason(reason);
-            txRepository.save(tx);
-        });
-        saveOutboxMessage(txId, "TRANSACTION_FAILED", String.format("{\"reason\":\"%s\"}", reason));
-        saveAuditLog("StablecoinTransaction", txId, "FAILED",
-                "{\"status\":\"PROCESSING\"}",
-                String.format("{\"status\":\"FAILED\",\"reason\":\"%s\"}", reason), userId);
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markBlocked(UUID txId, String reason, String userId) {
-        txRepository.findById(txId).ifPresent(tx -> {
-            tx.setStatus(TransactionStatus.BLOCKED);
-            tx.setFailureReason(reason);
-            txRepository.save(tx);
-        });
-        saveOutboxMessage(txId, "TRANSACTION_BLOCKED", String.format("{\"reason\":\"%s\"}", reason));
-        saveAuditLog("StablecoinTransaction", txId, "COMPLIANCE_BLOCKED",
-                "{\"status\":\"COMPLIANCE_CHECK\"}",
-                String.format("{\"status\":\"BLOCKED\",\"reason\":\"%s\"}", reason), userId);
-    }
-
     // ── Private Helpers ────────────────────────────────────────────────────────
+
+    /** Validiert einen Zustandsübergang gegen die ALLOWED-Map. Wirft IllegalStateException bei ungültigem Übergang. */
+    private void validateTransition(TransactionStatus current, TransactionStatus target) {
+        EnumSet<TransactionStatus> allowed = ALLOWED.getOrDefault(current, EnumSet.noneOf(TransactionStatus.class));
+        if (!allowed.contains(target)) {
+            throw new IllegalStateException(
+                    String.format("Ungültiger Statusübergang: %s → %s (erlaubt: %s)", current, target, allowed));
+        }
+    }
 
     private void notifyN8n(StablecoinTransaction tx, RevenueService.RevenueCalculation revenue) {
         try {
@@ -491,11 +561,11 @@ public class B2bTransferService {
     private static final Pattern STATUS_PATTERN = Pattern.compile("\"status\"\\s*:\\s*\"([^\"]+)\"");
 
     private List<TransactionResponse.TimelineEntry> buildTimeline(UUID txId) {
-        List<de.atruvia.stablecoin.entity.AuditLog> entries =
+        List<AuditLog> entries =
                 auditLogRepository.findByEntityTypeAndEntityIdOrderByTimestampAsc("StablecoinTransaction", txId);
 
         Map<TransactionStatus, LocalDateTime> seen = new LinkedHashMap<>();
-        for (de.atruvia.stablecoin.entity.AuditLog entry : entries) {
+        for (AuditLog entry : entries) {
             if (entry.getNewState() == null) continue;
             Matcher m = STATUS_PATTERN.matcher(entry.getNewState());
             if (!m.find()) continue;

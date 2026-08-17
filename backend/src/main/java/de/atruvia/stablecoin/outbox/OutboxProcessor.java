@@ -63,9 +63,9 @@ public class OutboxProcessor {
 
     private void processMessage(OutboxMessage msg) {
         switch (msg.getEventType()) {
-            case "TRANSACTION_SETTLED" -> log.info("[OUTBOX] Settlement event recorded txId={}", msg.getTransactionId());
+            case "TRANSACTION_SETTLED"   -> log.info("[OUTBOX] Settlement event recorded txId={}", msg.getTransactionId());
             case "TRANSACTION_INITIATED" -> log.info("[OUTBOX] Initiation event recorded txId={}", msg.getTransactionId());
-            case "TRANSACTION_BLOCKED" -> log.warn("[OUTBOX] Block event recorded txId={}", msg.getTransactionId());
+            case "TRANSACTION_FAILED"    -> log.warn("[OUTBOX] Failed event recorded txId={}", msg.getTransactionId());
             default -> log.debug("[OUTBOX] Unhandled event type={} txId={}", msg.getEventType(), msg.getTransactionId());
         }
     }
