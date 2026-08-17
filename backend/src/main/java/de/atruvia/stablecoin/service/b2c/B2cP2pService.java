@@ -70,9 +70,8 @@ public class B2cP2pService {
         alias.setCustomerAccount(account);
         phoneAliasRepository.save(alias);
 
-        saveAuditLog(account.getId(), "PhoneAlias", "PHONE_ALIAS_REGISTERED", null,
-                String.format("{\"iban\":\"%s\",\"walletAddress\":\"%s\"}", request.sourceIban(), request.walletAddress()),
-                userId);
+        saveAuditLog(account.getId(), "PhoneAlias", "PHONE_ALIAS_REGISTERED", userId,
+                "Telefon-Alias registriert: iban=" + request.sourceIban() + ", walletAddress=" + request.walletAddress());
 
         log.info("[B2C-P2P] Phone alias registered for account={}", account.getCustomerId());
     }
@@ -119,10 +118,8 @@ public class B2cP2pService {
         savedTx.setGasCost(revenue.gasCost());
         txRepository.save(savedTx);
 
-        saveAuditLog(savedTx.getId(), "StablecoinTransaction", "P2P_SENT", null,
-                String.format("{\"status\":\"SETTLED\",\"amount\":\"%s\",\"to\":\"%s\"}",
-                        request.amountEur(), recipientAlias.getWalletAddress()),
-                userId);
+        saveAuditLog(savedTx.getId(), "StablecoinTransaction", "P2P_SENT", userId,
+                "P2P-Zahlung gesendet: amount=" + request.amountEur() + " EUR, to=" + recipientAlias.getWalletAddress());
 
         log.info("[B2C-P2P] SETTLED tx={} amount={}EUR to={}", savedTx.getId(), request.amountEur(), recipientAlias.getWalletAddress());
 
@@ -150,14 +147,13 @@ public class B2cP2pService {
     }
 
     private void saveAuditLog(UUID entityId, String entityType, String action,
-                              String previousState, String newState, String userId) {
+                              String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType(entityType);
         entry.setEntityId(entityId);
         entry.setAction(action);
-        entry.setPreviousState(previousState);
-        entry.setNewState(newState);
         entry.setUserId(userId);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 }

@@ -173,7 +173,13 @@ B2bController → B2bTransferService.listTransfers()
 ### UC-03 · Transfer-Detail abrufen
 
 **Summary**
-Einzelne Transaktion per UUID mit vollständiger Status-Timeline aus dem AuditLog.
+Einzelne Transaktion per UUID mit vollständiger Status-Timeline. Die Timeline wird direkt
+aus dem relationalen `AuditLog`-Schema gelesen — kein Regex-Parsing mehr.
+
+**Fachliche Einordnung**
+- `AuditLog` speichert `fromStatus`/`toStatus` als Enum-Spalten (direkt indexierbar)
+- `buildTimeline()` ist ein einfacher DB-Query nach `transaction_id`, sortiert nach `timestamp`
+- Jeder `TimelineEntry` enthält: `fromStatus`, `toStatus`, `performedBy`, `at`, `details`
 
 **Sequenzdiagramm**
 
@@ -185,10 +191,17 @@ B2bController → B2bTransferService.getById()
   ├── TxRepository.findById(id) → 404 wenn nicht gefunden
   ├── ApprovalRepository.findByTransactionId() → requiresApproval-Flag
   ├── buildTimeline(txId)
-  │     ├── AuditLog.findByEntityType...OrderByTimestamp()
-  │     ├── Regex auf newState JSON → "status":"XXX"
-  │     └── LinkedHashMap<Status, Timestamp> → geordnete Timeline
+  │     ├── AuditLogRepository.findByTransactionIdOrderByTimestampAsc(txId)
+  │     ├── filter: nur Einträge mit toStatus != null
+  │     └── map → TimelineEntry {fromStatus, toStatus, performedBy, at, details}
   └── ← 200 TransactionResponse + timeline[]
+
+Beispiel-Timeline für einen SETTLED-Transfer:
+  null → CREATED         | by:cust-b2b-001 | "Transfer initiiert: 500 EUR USDC"
+  CREATED → COMPLIANCE_CHECKED | by:cust-b2b-001 | "Statuswechsel: CREATED → COMPLIANCE_CHECKED"
+  COMPLIANCE_CHECKED → FUNDS_HELD | by:cust-b2b-001 | "EUR-Hold angelegt: holdId=hold-xxxx"
+  FUNDS_HELD → SUBMITTED | by:cust-b2b-001 | "Statuswechsel: FUNDS_HELD → SUBMITTED"
+  SUBMITTED → SETTLED    | by:SYSTEM        | "Settlement abgeschlossen: blockchainHash=0xabc..."
 ```
 
 ---
@@ -746,7 +759,8 @@ CommonController.getTransaction()
   ├── AccountRepository.findByCustomerId(auth.getName())
   ├── [tx.customerAccount.id ≠ requestingAccount.id] → 403 AUTH_001
   ├── ApprovalRepository.findByTransactionId() → requiresApproval-Flag
-  ├── buildTimeline(id) aus AuditLog-Einträgen
+  ├── buildTimeline(id)
+  │     └── AuditLogRepository.findByTransactionIdOrderByTimestampAsc(id) → direkte Spalten
   └── ← 200 TransactionResponse + timeline[]
 ```
 
@@ -940,7 +954,7 @@ Jede Statusänderung schreibt in `outbox_message` — Grundlage für zuverlässi
 
 ### 3. AuditLog als Append-only Event-Store
 
-`audit_log` ist INSERT-only und dient als Event-Store. Status-Timeline (UC-03, UC-22) wird per Regex auf JSON-Snapshots rekonstruiert.
+`audit_log` ist INSERT-only. Neues relationales Schema (V7-Migration): `transactionId` (indexierter FK), `fromStatus`/`toStatus` (Enum-Spalten), `details` (Klartext). Status-Timeline (UC-03, UC-22) wird direkt per `findByTransactionIdOrderByTimestampAsc()` geladen — kein Regex-Parsing mehr. Performance: Index auf `transaction_id` ermöglicht effizienten Lookup ohne Full-Table-Scan.
 
 ### 4. Doppelte Whitelist-Architektur (UC-01, UC-07, UC-24)
 

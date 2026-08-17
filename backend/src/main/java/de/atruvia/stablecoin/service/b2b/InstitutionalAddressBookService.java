@@ -49,7 +49,7 @@ public class InstitutionalAddressBookService {
         if (!screening.approved()) {
             log.warn("[INST-ADDR] Blocked high-risk address={} riskScore={}", request.walletAddress(), screening.riskScore());
             writeAuditLog(UUID.randomUUID(), "INST_ADDRESS_SCREENING_BLOCKED", userId,
-                    String.format("{\"address\":\"%s\",\"riskScore\":\"%s\"}", request.walletAddress(), screening.riskScore()));
+                    "Institutional screening blockiert: address=" + request.walletAddress() + ", riskScore=" + screening.riskScore());
             throw new ComplianceBlockException(request.walletAddress(), screening.riskScore());
         }
 
@@ -62,8 +62,7 @@ public class InstitutionalAddressBookService {
         InstitutionalAddressBook saved = repository.save(entry);
 
         writeAuditLog(saved.getId(), "INST_ADDRESS_ADDED", userId,
-                String.format("{\"address\":\"%s\",\"label\":\"%s\",\"riskScore\":\"%s\"}",
-                        saved.getWalletAddress(), saved.getLabel(), saved.getRiskScore()));
+                "Institutionelle Adresse hinzugefügt: address=" + saved.getWalletAddress() + ", label=" + saved.getLabel());
 
         log.info("[INST-ADDR] Added address={} riskScore={} by={}", saved.getWalletAddress(), saved.getRiskScore(), userId);
         return toResponse(saved);
@@ -89,17 +88,17 @@ public class InstitutionalAddressBookService {
         address.setStatus(InstitutionalAddressStatus.REVOKED);
         repository.save(address);
         writeAuditLog(id, "INST_ADDRESS_REVOKED", userId,
-                String.format("{\"address\":\"%s\",\"label\":\"%s\"}", address.getWalletAddress(), address.getLabel()));
+                "Institutionelle Adresse widerrufen: address=" + address.getWalletAddress() + ", label=" + address.getLabel());
         log.info("[INST-ADDR] Revoked address={} by={}", address.getWalletAddress(), userId);
     }
 
-    private void writeAuditLog(UUID entityId, String action, String userId, String newState) {
+    private void writeAuditLog(UUID entityId, String action, String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType("InstitutionalAddressBook");
         entry.setEntityId(entityId);
         entry.setAction(action);
         entry.setUserId(userId);
-        entry.setNewState(newState);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 

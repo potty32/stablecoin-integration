@@ -9,6 +9,6 @@ import java.util.UUID;
 
 @Repository
 public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
+    List<AuditLog> findByTransactionIdOrderByTimestampAsc(UUID transactionId);
     List<AuditLog> findByEntityTypeAndEntityIdOrderByTimestampAsc(String entityType, UUID entityId);
-    List<AuditLog> findByEntityTypeAndEntityIdOrderByTimestampDesc(String entityType, UUID entityId);
 }

@@ -5,10 +5,8 @@ import de.atruvia.stablecoin.client.CoreBankingClient;
 import de.atruvia.stablecoin.client.dto.CircleWalletBalanceDto;
 import de.atruvia.stablecoin.dto.response.AccountBalanceResponse;
 import de.atruvia.stablecoin.dto.response.TransactionResponse;
-import de.atruvia.stablecoin.entity.AuditLog;
 import de.atruvia.stablecoin.entity.CustomerAccount;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
-import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.repository.ApprovalWorkflowRepository;
 import de.atruvia.stablecoin.repository.AuditLogRepository;
 import de.atruvia.stablecoin.repository.CustomerAccountRepository;
@@ -19,21 +17,15 @@ import org.springframework.web.bind.annotation.*;
 
 import org.springframework.security.access.AccessDeniedException;
 
-import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1")
 public class CommonController {
-
-    private static final Pattern STATUS_PATTERN = Pattern.compile("\"status\"\\s*:\\s*\"([^\"]+)\"");
 
     private final CustomerAccountRepository accountRepository;
     private final StablecoinTransactionRepository txRepository;
@@ -110,21 +102,15 @@ public class CommonController {
     }
 
     private List<TransactionResponse.TimelineEntry> buildTimeline(UUID txId) {
-        List<AuditLog> entries =
-                auditLogRepository.findByEntityTypeAndEntityIdOrderByTimestampAsc("StablecoinTransaction", txId);
-
-        Map<TransactionStatus, LocalDateTime> seen = new LinkedHashMap<>();
-        for (AuditLog entry : entries) {
-            if (entry.getNewState() == null) continue;
-            Matcher m = STATUS_PATTERN.matcher(entry.getNewState());
-            if (!m.find()) continue;
-            try {
-                TransactionStatus status = TransactionStatus.valueOf(m.group(1));
-                seen.putIfAbsent(status, entry.getTimestamp());
-            } catch (IllegalArgumentException ignored) {}
-        }
-        return seen.entrySet().stream()
-                .map(e -> new TransactionResponse.TimelineEntry(e.getKey(), e.getValue()))
+        return auditLogRepository.findByTransactionIdOrderByTimestampAsc(txId)
+                .stream()
+                .filter(e -> e.getToStatus() != null)
+                .map(e -> new TransactionResponse.TimelineEntry(
+                        e.getFromStatus(),
+                        e.getToStatus(),
+                        e.getUserId(),
+                        e.getTimestamp(),
+                        e.getDetails()))
                 .toList();
     }
 }

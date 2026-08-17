@@ -94,10 +94,8 @@ public class B2cMicropaymentService {
         savedTx.setGrossRevenue(MICROPAYMENT_FEE);
         txRepository.save(savedTx);
 
-        saveAuditLog(savedTx.getId(), "MICROPAYMENT_SETTLED", null,
-                String.format("{\"status\":\"SETTLED\",\"amount\":\"%s\",\"merchant\":\"%s\",\"content\":\"%s\"}",
-                        request.amountEur(), request.destinationMerchantId(), request.contentId()),
-                userId);
+        saveAuditLog(savedTx.getId(), "MICROPAYMENT_SETTLED", userId,
+                "Micropayment: amount=" + request.amountEur() + " EUR, merchant=" + request.destinationMerchantId() + ", content=" + request.contentId());
 
         log.info("[B2C-MICROPAY] SETTLED tx={} amount={}EUR merchant={}", savedTx.getId(), request.amountEur(), request.destinationMerchantId());
 
@@ -137,14 +135,13 @@ public class B2cMicropaymentService {
         return MERCHANT_WALLET_PREFIX + padded;
     }
 
-    private void saveAuditLog(UUID entityId, String action, String previousState, String newState, String userId) {
+    private void saveAuditLog(UUID entityId, String action, String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType("StablecoinTransaction");
         entry.setEntityId(entityId);
         entry.setAction(action);
-        entry.setPreviousState(previousState);
-        entry.setNewState(newState);
         entry.setUserId(userId);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 }

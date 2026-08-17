@@ -73,9 +73,9 @@ public class SanctionsBatchService {
             entry.setEntityId(address.getId());
             entry.setAction("SANCTIONS_BATCH_REVOKED");
             entry.setUserId("SYSTEM");
-            entry.setNewState(String.format(
-                    "{\"address\":\"%s\",\"riskScore\":\"%s\",\"source\":\"NIGHTLY_BATCH\"}",
-                    address.getWalletAddress(), result.riskScore()));
+            entry.setDetails("Sanctions-Batch: address=" + address.getWalletAddress()
+                    + ", riskScore=" + result.riskScore()
+                    + ", source=NIGHTLY_BATCH");
             auditLogRepository.save(entry);
 
             try {

@@ -113,10 +113,8 @@ public class B2cRemittanceService {
         savedTx.setGasCost(revenue.gasCost());
         txRepository.save(savedTx);
 
-        saveAuditLog(savedTx.getId(), "REMITTANCE_SENT", null,
-                String.format("{\"status\":\"SETTLED\",\"amount\":\"%s\",\"recipient\":\"%s\",\"country\":\"%s\"}",
-                        request.amountEur(), request.recipientName(), request.recipientCountry()),
-                userId);
+        saveAuditLog(savedTx.getId(), "REMITTANCE_SENT", userId,
+                "Auslandsüberweisung: amount=" + request.amountEur() + " EUR, recipient=" + request.recipientName() + ", country=" + request.recipientCountry());
 
         log.info("[B2C-REMITTANCE] SETTLED tx={} amount={}EUR recipient={}",
                 savedTx.getId(), request.amountEur(), request.recipientName());
@@ -134,14 +132,13 @@ public class B2cRemittanceService {
         );
     }
 
-    private void saveAuditLog(UUID entityId, String action, String previousState, String newState, String userId) {
+    private void saveAuditLog(UUID entityId, String action, String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType("StablecoinTransaction");
         entry.setEntityId(entityId);
         entry.setAction(action);
-        entry.setPreviousState(previousState);
-        entry.setNewState(newState);
         entry.setUserId(userId);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 }

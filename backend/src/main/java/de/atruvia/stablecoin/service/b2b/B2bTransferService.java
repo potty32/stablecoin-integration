@@ -37,8 +37,6 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static de.atruvia.stablecoin.entity.TransactionStatus.*;
 import static java.util.Map.entry;
@@ -226,9 +224,7 @@ public class B2bTransferService {
 
         tx.setStatus(targetStatus);
         txRepository.save(tx);
-        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
-                String.format("{\"status\":\"%s\"}", current),
-                String.format("{\"status\":\"%s\"}", targetStatus), userId);
+        saveTransitionLog(txId, current, targetStatus, userId, "Statuswechsel: " + current + " → " + targetStatus);
         log.info("[STATE-MACHINE] tx={} {} → {}", txId, current, targetStatus);
     }
 
@@ -241,9 +237,8 @@ public class B2bTransferService {
         tx.setStatus(FUNDS_HELD);
         tx.setHoldId(holdId);
         txRepository.save(tx);
-        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
-                String.format("{\"status\":\"%s\"}", COMPLIANCE_CHECKED),
-                "{\"status\":\"FUNDS_HELD\"}", userId);
+        saveTransitionLog(txId, COMPLIANCE_CHECKED, FUNDS_HELD, userId,
+                "EUR-Hold angelegt: holdId=" + holdId);
         log.info("[STATE-MACHINE] tx={} {} → FUNDS_HELD holdId={}", txId, COMPLIANCE_CHECKED, holdId);
     }
 
@@ -264,9 +259,7 @@ public class B2bTransferService {
         tx.setFailureReason(reason);
         txRepository.save(tx);
         saveOutboxMessage(txId, "TRANSACTION_FAILED", String.format("{\"reason\":\"%s\"}", reason));
-        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
-                String.format("{\"status\":\"%s\"}", current),
-                String.format("{\"status\":\"FAILED\",\"reason\":\"%s\"}", reason), userId);
+        saveTransitionLog(txId, current, FAILED, userId, "Abbruch aus " + current + ": " + reason);
         log.warn("[STATE-MACHINE] tx={} {} → FAILED reason={}", txId, current, reason);
     }
 
@@ -280,9 +273,7 @@ public class B2bTransferService {
         tx.setStatus(REJECTED);
         tx.setFailureReason(reason);
         txRepository.save(tx);
-        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
-                String.format("{\"status\":\"%s\"}", current),
-                String.format("{\"status\":\"REJECTED\",\"reason\":\"%s\"}", reason), userId);
+        saveTransitionLog(txId, current, REJECTED, userId, "Abgelehnt: " + reason);
         log.info("[STATE-MACHINE] tx={} {} → REJECTED reason={}", txId, current, reason);
     }
 
@@ -299,9 +290,8 @@ public class B2bTransferService {
         tx.setGasCost(revenue.gasCost());
         tx.setGrossRevenue(revenue.grossRevenue());
         txRepository.save(tx);
-        saveAuditLog("StablecoinTransaction", txId, "TRANSITION",
-                "{\"status\":\"SUBMITTED\"}",
-                String.format("{\"status\":\"SETTLED\",\"hash\":\"%s\"}", blockchainHash), "SYSTEM");
+        saveTransitionLog(txId, SUBMITTED, SETTLED, "SYSTEM",
+                "Settlement abgeschlossen: blockchainHash=" + blockchainHash);
         log.info("[STATE-MACHINE] tx={} SUBMITTED → SETTLED hash={}", txId, blockchainHash);
     }
 
@@ -358,8 +348,8 @@ public class B2bTransferService {
 
         saveOutboxMessage(savedTx.getId(), "TRANSACTION_INITIATED",
                 String.format("{\"amount\":\"%s\",\"currency\":\"%s\"}", request.amountEur(), request.currency()));
-        saveAuditLog("StablecoinTransaction", savedTx.getId(), "CREATED", null,
-                String.format("{\"status\":\"CREATED\",\"amount\":\"%s\"}", request.amountEur()), initiatorId);
+        saveTransitionLog(savedTx.getId(), null, CREATED, initiatorId,
+                "Transfer initiiert: " + request.amountEur() + " EUR " + request.currency());
 
         boolean requiresApproval = request.amountEur().compareTo(account.getTxLimitSingle()) > 0;
         if (requiresApproval) {
@@ -370,8 +360,8 @@ public class B2bTransferService {
             approvalRepository.save(workflow);
             savedTx.setStatus(PENDING_APPROVAL);
             txRepository.save(savedTx);
-            saveAuditLog("StablecoinTransaction", savedTx.getId(), "TRANSITION",
-                    "{\"status\":\"CREATED\"}", "{\"status\":\"PENDING_APPROVAL\"}", initiatorId);
+            saveTransitionLog(savedTx.getId(), CREATED, PENDING_APPROVAL, initiatorId,
+                    "Vier-Augen-Freigabe erforderlich (Betrag: " + request.amountEur() + " EUR > Limit)");
             log.info("[B2B] tx={} PENDING_APPROVAL ({}EUR > limit {}EUR)",
                     savedTx.getId(), request.amountEur(), account.getTxLimitSingle());
         }
@@ -537,15 +527,28 @@ public class B2bTransferService {
         outboxRepository.save(msg);
     }
 
-    private void saveAuditLog(String entityType, UUID entityId, String action,
-                              String previousState, String newState, String userId) {
+    private void saveTransitionLog(UUID txId, TransactionStatus from, TransactionStatus to,
+                                   String userId, String details) {
+        AuditLog entry = new AuditLog();
+        entry.setTransactionId(txId);
+        entry.setEntityType("StablecoinTransaction");
+        entry.setEntityId(txId);
+        entry.setFromStatus(from);
+        entry.setToStatus(to);
+        entry.setAction("STATUS_CHANGE");
+        entry.setUserId(userId);
+        entry.setDetails(details);
+        auditLogRepository.save(entry);
+    }
+
+    private void saveEventLog(UUID entityId, String entityType, String action,
+                              String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType(entityType);
         entry.setEntityId(entityId);
         entry.setAction(action);
-        entry.setPreviousState(previousState);
-        entry.setNewState(newState);
         entry.setUserId(userId);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 
@@ -558,24 +561,16 @@ public class B2bTransferService {
         );
     }
 
-    private static final Pattern STATUS_PATTERN = Pattern.compile("\"status\"\\s*:\\s*\"([^\"]+)\"");
-
     private List<TransactionResponse.TimelineEntry> buildTimeline(UUID txId) {
-        List<AuditLog> entries =
-                auditLogRepository.findByEntityTypeAndEntityIdOrderByTimestampAsc("StablecoinTransaction", txId);
-
-        Map<TransactionStatus, LocalDateTime> seen = new LinkedHashMap<>();
-        for (AuditLog entry : entries) {
-            if (entry.getNewState() == null) continue;
-            Matcher m = STATUS_PATTERN.matcher(entry.getNewState());
-            if (!m.find()) continue;
-            try {
-                TransactionStatus status = TransactionStatus.valueOf(m.group(1));
-                seen.putIfAbsent(status, entry.getTimestamp());
-            } catch (IllegalArgumentException ignored) {}
-        }
-        return seen.entrySet().stream()
-                .map(e -> new TransactionResponse.TimelineEntry(e.getKey(), e.getValue()))
+        return auditLogRepository.findByTransactionIdOrderByTimestampAsc(txId)
+                .stream()
+                .filter(e -> e.getToStatus() != null)
+                .map(e -> new TransactionResponse.TimelineEntry(
+                        e.getFromStatus(),
+                        e.getToStatus(),
+                        e.getUserId(),
+                        e.getTimestamp(),
+                        e.getDetails()))
                 .toList();
     }
 

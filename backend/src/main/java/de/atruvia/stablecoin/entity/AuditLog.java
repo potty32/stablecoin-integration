@@ -1,8 +1,6 @@
 package de.atruvia.stablecoin.entity;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -23,25 +21,25 @@ public class AuditLog {
     @Column(nullable = false, length = 50)
     private String action;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "previous_state", columnDefinition = "jsonb")
-    private String previousState;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "new_state", columnDefinition = "jsonb")
-    private String newState;
-
     @Column(name = "user_id", length = 100)
     private String userId;
 
-    @Column(name = "ip_address", length = 45)
-    private String ipAddress;
-
-    @Column(name = "trace_id", length = 64)
-    private String traceId;
-
     @Column(nullable = false)
     private LocalDateTime timestamp;
+
+    @Column(name = "transaction_id")
+    private UUID transactionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "from_status", length = 25)
+    private TransactionStatus fromStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "to_status", length = 25)
+    private TransactionStatus toStatus;
+
+    @Column(name = "details", columnDefinition = "TEXT")
+    private String details;
 
     @PrePersist
     protected void onCreate() {
@@ -55,15 +53,15 @@ public class AuditLog {
     public void setEntityId(UUID entityId) { this.entityId = entityId; }
     public String getAction() { return action; }
     public void setAction(String action) { this.action = action; }
-    public String getPreviousState() { return previousState; }
-    public void setPreviousState(String previousState) { this.previousState = previousState; }
-    public String getNewState() { return newState; }
-    public void setNewState(String newState) { this.newState = newState; }
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
-    public String getIpAddress() { return ipAddress; }
-    public void setIpAddress(String ipAddress) { this.ipAddress = ipAddress; }
-    public String getTraceId() { return traceId; }
-    public void setTraceId(String traceId) { this.traceId = traceId; }
     public LocalDateTime getTimestamp() { return timestamp; }
+    public UUID getTransactionId() { return transactionId; }
+    public void setTransactionId(UUID transactionId) { this.transactionId = transactionId; }
+    public TransactionStatus getFromStatus() { return fromStatus; }
+    public void setFromStatus(TransactionStatus fromStatus) { this.fromStatus = fromStatus; }
+    public TransactionStatus getToStatus() { return toStatus; }
+    public void setToStatus(TransactionStatus toStatus) { this.toStatus = toStatus; }
+    public String getDetails() { return details; }
+    public void setDetails(String details) { this.details = details; }
 }

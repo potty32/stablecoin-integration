@@ -37,12 +37,13 @@ public class ComplianceService {
         AuditLog entry = new AuditLog();
         entry.setEntityType("StablecoinTransaction");
         entry.setEntityId(transactionId);
+        entry.setTransactionId(transactionId);
         entry.setAction("COMPLIANCE_SCREEN");
         entry.setUserId(userId);
-        entry.setNewState(String.format(
-                "{\"address\":\"%s\",\"riskScore\":\"%s\",\"sanctioned\":%b,\"approved\":%b}",
-                walletAddress, result.riskScore(), result.sanctionedEntity(), result.approved()
-        ));
+        entry.setDetails("AML-Screening: walletAddress=" + walletAddress
+                + ", riskScore=" + result.riskScore()
+                + ", sanctioned=" + result.sanctionedEntity()
+                + ", approved=" + result.approved());
         auditLogRepository.save(entry);
 
         if (!result.approved()) {
@@ -52,12 +53,12 @@ public class ComplianceService {
             AuditLog blockEntry = new AuditLog();
             blockEntry.setEntityType("StablecoinTransaction");
             blockEntry.setEntityId(transactionId);
+            blockEntry.setTransactionId(transactionId);
             blockEntry.setAction("COMPLIANCE_BLOCKED");
             blockEntry.setUserId(userId);
-            blockEntry.setNewState(String.format(
-                    "{\"address\":\"%s\",\"riskScore\":\"%s\",\"categories\":%s}",
-                    walletAddress, result.riskScore(), result.riskCategories()
-            ));
+            blockEntry.setDetails("AML-Block: walletAddress=" + walletAddress
+                    + ", riskScore=" + result.riskScore()
+                    + ", categories=" + result.riskCategories());
             auditLogRepository.save(blockEntry);
 
             throw new ComplianceBlockException(walletAddress, result.riskScore());
@@ -76,9 +77,10 @@ public class ComplianceService {
         AuditLog entry = new AuditLog();
         entry.setEntityType("StablecoinTransaction");
         entry.setEntityId(transactionId);
+        entry.setTransactionId(transactionId);
         entry.setAction("COMPLIANCE_FALLBACK_BLOCK");
         entry.setUserId(userId);
-        entry.setNewState(String.format("{\"address\":\"%s\",\"reason\":\"CHAINALYSIS_UNAVAILABLE\"}", walletAddress));
+        entry.setDetails("AML-Block (Chainalysis nicht erreichbar): walletAddress=" + walletAddress);
         auditLogRepository.save(entry);
 
         throw new ComplianceBlockException(walletAddress, "UNAVAILABLE");

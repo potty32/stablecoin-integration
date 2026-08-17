@@ -56,10 +56,8 @@ public class AddressBookService {
         if (!screening.approved()) {
             log.warn("[ADDRESS-BOOK] Blocked high-risk address={} riskScore={} user={}",
                     request.walletAddress(), screening.riskScore(), userId);
-            writeAuditLog(UUID.randomUUID(), "ADDRESS_SCREENING_BLOCKED", userId, String.format(
-                    "{\"address\":\"%s\",\"riskScore\":\"%s\",\"categories\":%s}",
-                    request.walletAddress(), screening.riskScore(), screening.riskCategories()
-            ));
+            writeAuditLog(UUID.randomUUID(), "ADDRESS_SCREENING_BLOCKED", userId,
+                    "Screening blockiert: address=" + request.walletAddress() + ", riskScore=" + screening.riskScore());
             throw new ComplianceBlockException(request.walletAddress(), screening.riskScore());
         }
 
@@ -72,10 +70,10 @@ public class AddressBookService {
 
         AddressBook saved = addressBookRepository.save(entry);
 
-        writeAuditLog(saved.getId(), "ADDRESS_ADDED", userId, String.format(
-                "{\"address\":\"%s\",\"label\":\"%s\",\"riskScore\":\"%s\",\"currency\":\"%s\"}",
-                saved.getWalletAddress(), saved.getLabel(), saved.getRiskScore(), saved.getCurrency()
-        ));
+        writeAuditLog(saved.getId(), "ADDRESS_ADDED", userId,
+                "Adresse hinzugefügt: address=" + saved.getWalletAddress()
+                        + ", label=" + saved.getLabel()
+                        + ", riskScore=" + saved.getRiskScore());
 
         log.info("[ADDRESS-BOOK] Added address={} riskScore={} user={}", saved.getWalletAddress(), saved.getRiskScore(), userId);
         return toResponse(saved);
@@ -104,9 +102,8 @@ public class AddressBookService {
         address.setStatus(AddressStatus.REVOKED);
         addressBookRepository.save(address);
 
-        writeAuditLog(addressId, "ADDRESS_REVOKED", userId, String.format(
-                "{\"address\":\"%s\",\"label\":\"%s\"}", address.getWalletAddress(), address.getLabel()
-        ));
+        writeAuditLog(addressId, "ADDRESS_REVOKED", userId,
+                "Adresse widerrufen: address=" + address.getWalletAddress() + ", label=" + address.getLabel());
 
         log.info("[ADDRESS-BOOK] Revoked address={} user={}", address.getWalletAddress(), userId);
     }
@@ -116,13 +113,13 @@ public class AddressBookService {
                 .orElseThrow(() -> new NoSuchElementException("No account for user: " + userId));
     }
 
-    private void writeAuditLog(UUID entityId, String action, String userId, String newState) {
+    private void writeAuditLog(UUID entityId, String action, String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType("AddressBook");
         entry.setEntityId(entityId);
         entry.setAction(action);
         entry.setUserId(userId);
-        entry.setNewState(newState);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 

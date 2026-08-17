@@ -81,10 +81,8 @@ public class B2cYieldService {
         position.setDepositTransactionId(savedTx.getId());
         YieldPosition savedPosition = yieldPositionRepository.save(position);
 
-        saveAuditLog(savedPosition.getId(), "YieldPosition", "YIELD_DEPOSIT_CREATED", null,
-                String.format("{\"status\":\"ACTIVE\",\"amount\":\"%s\",\"annualRate\":\"%s%%\",\"depositTxId\":\"%s\"}",
-                        request.amountEur(), ANNUAL_YIELD_RATE, savedTx.getId()),
-                userId);
+        saveAuditLog(savedPosition.getId(), "YieldPosition", "YIELD_DEPOSIT_CREATED", userId,
+                "Yield-Einlage erstellt: " + request.amountEur() + " EUR, Rate=" + ANNUAL_YIELD_RATE + "%, depositTxId=" + savedTx.getId());
 
         log.info("[B2C-YIELD] Deposit SETTLED depositTx={} position={} amount={}EUR",
                 savedTx.getId(), savedPosition.getId(), request.amountEur());
@@ -141,11 +139,8 @@ public class B2cYieldService {
         position.setClosedAt(LocalDateTime.now());
         yieldPositionRepository.save(position);
 
-        saveAuditLog(positionId, "YieldPosition", "YIELD_REDEEMED",
-                String.format("{\"status\":\"ACTIVE\",\"principal\":\"%s\"}", position.getPrincipal()),
-                String.format("{\"status\":\"CLOSED\",\"accruedYield\":\"%s\",\"daysSinceDeposit\":%d,\"redeemTxId\":\"%s\"}",
-                        accrued, days, savedRedeemTx.getId()),
-                userId);
+        saveAuditLog(positionId, "YieldPosition", "YIELD_REDEEMED", userId,
+                "Yield-Anlage aufgelöst: principal=" + position.getPrincipal() + " EUR, accruedYield=" + accrued + " EUR, days=" + days + ", redeemTxId=" + savedRedeemTx.getId());
 
         log.info("[B2C-YIELD] Redeemed position={} redeemTx={} days={} accruedYield={}EUR",
                 positionId, savedRedeemTx.getId(), days, accrued);
@@ -184,14 +179,13 @@ public class B2cYieldService {
     }
 
     private void saveAuditLog(UUID entityId, String entityType, String action,
-                              String previousState, String newState, String userId) {
+                              String userId, String details) {
         AuditLog entry = new AuditLog();
         entry.setEntityType(entityType);
         entry.setEntityId(entityId);
         entry.setAction(action);
-        entry.setPreviousState(previousState);
-        entry.setNewState(newState);
         entry.setUserId(userId);
+        entry.setDetails(details);
         auditLogRepository.save(entry);
     }
 }

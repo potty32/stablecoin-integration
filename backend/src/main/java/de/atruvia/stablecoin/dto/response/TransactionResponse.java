@@ -23,5 +23,11 @@ public record TransactionResponse(
         LocalDateTime settledAt,
         List<TimelineEntry> timeline
 ) {
-    public record TimelineEntry(TransactionStatus status, LocalDateTime at) {}
+    public record TimelineEntry(
+            TransactionStatus fromStatus,
+            TransactionStatus toStatus,
+            String performedBy,
+            LocalDateTime at,
+            String details
+    ) {}
 }
