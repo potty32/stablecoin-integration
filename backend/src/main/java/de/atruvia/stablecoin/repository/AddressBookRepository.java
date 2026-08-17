@@ -13,4 +13,5 @@ import java.util.UUID;
 public interface AddressBookRepository extends JpaRepository<AddressBook, UUID> {
     List<AddressBook> findByCustomerAccountIdAndStatus(UUID customerAccountId, AddressStatus status);
     Optional<AddressBook> findByCustomerAccountIdAndWalletAddressAndStatus(UUID customerAccountId, String walletAddress, AddressStatus status);
+    List<AddressBook> findByStatus(AddressStatus status);
 }

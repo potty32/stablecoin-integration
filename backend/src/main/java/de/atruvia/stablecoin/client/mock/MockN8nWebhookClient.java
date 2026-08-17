@@ -18,4 +18,10 @@ public class MockN8nWebhookClient implements N8nWebhookClient {
         log.info("[MOCK n8n] Settlement notification received: txId={} revenue={}",
                 notification.transactionId(), notification.grossRevenue());
     }
+
+    @Override
+    public void notifyAddressRevoked(String walletAddress, String customerId, String riskScore) {
+        log.warn("[MOCK n8n] Address revoked by sanctions batch: wallet={} customer={} riskScore={}",
+                walletAddress, customerId, riskScore);
+    }
 }

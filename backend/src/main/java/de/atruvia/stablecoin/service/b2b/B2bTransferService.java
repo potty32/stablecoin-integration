@@ -11,11 +11,13 @@ import de.atruvia.stablecoin.dto.response.RateQuoteResponse;
 import de.atruvia.stablecoin.dto.response.TransactionResponse;
 import de.atruvia.stablecoin.dto.response.TransferPageResponse;
 import de.atruvia.stablecoin.entity.*;
+import de.atruvia.stablecoin.entity.AddressStatus;
 import de.atruvia.stablecoin.exception.ComplianceBlockException;
 import de.atruvia.stablecoin.exception.IdempotencyConflictException;
 import de.atruvia.stablecoin.exception.TaurusLimitExceededException;
 import de.atruvia.stablecoin.repository.*;
 import de.atruvia.stablecoin.service.compliance.ComplianceService;
+import de.atruvia.stablecoin.service.fx.FxRateService;
 import de.atruvia.stablecoin.service.revenue.RevenueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,13 +47,16 @@ import org.springframework.data.domain.Sort;
 public class B2bTransferService {
 
     private static final Logger log = LoggerFactory.getLogger(B2bTransferService.class);
-    private static final BigDecimal BASE_RATE = new BigDecimal("1.000000");
+    private final FxRateService fxRateService;
 
     @Value("${app.revenue.fx-spread:0.0015}")
     private BigDecimal fxSpread;
 
     @Value("${app.rate-quote.validity-seconds:60}")
     private long rateQuoteValiditySeconds;
+
+    @Value("${app.security.dev-mode:false}")
+    private boolean devMode;
 
     // Self-Injection: @Transactional(REQUIRES_NEW)-Methoden müssen über den Proxy laufen
     @Lazy @Autowired
@@ -69,6 +74,7 @@ public class B2bTransferService {
     private final CircleWalletClient circleWalletClient;
     private final TaurusCustodyClient taurusCustodyClient;
     private final N8nWebhookClient n8nWebhookClient;
+    private final AddressBookRepository addressBookRepository;
 
     public B2bTransferService(
             StablecoinTransactionRepository txRepository,
@@ -82,7 +88,9 @@ public class B2bTransferService {
             CoreBankingClient coreBankingClient,
             CircleWalletClient circleWalletClient,
             TaurusCustodyClient taurusCustodyClient,
-            N8nWebhookClient n8nWebhookClient) {
+            N8nWebhookClient n8nWebhookClient,
+            AddressBookRepository addressBookRepository,
+            FxRateService fxRateService) {
         this.txRepository = txRepository;
         this.accountRepository = accountRepository;
         this.approvalRepository = approvalRepository;
@@ -95,6 +103,8 @@ public class B2bTransferService {
         this.circleWalletClient = circleWalletClient;
         this.taurusCustodyClient = taurusCustodyClient;
         this.n8nWebhookClient = n8nWebhookClient;
+        this.addressBookRepository = addressBookRepository;
+        this.fxRateService = fxRateService;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -135,6 +145,9 @@ public class B2bTransferService {
         if (workflow.getStatus() != ApprovalStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Not pending approval: " + workflow.getStatus());
         }
+        if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
+            throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
+        }
         workflow.setStatus(ApprovalStatus.REJECTED);
         approvalRepository.save(workflow);
 
@@ -164,7 +177,8 @@ public class B2bTransferService {
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException("No B2B account found"));
 
-        BigDecimal rate = BASE_RATE.add(BASE_RATE.multiply(fxSpread)).setScale(8, RoundingMode.HALF_UP);
+        BigDecimal baseRate = fxRateService.getBaseRate(currency);
+        BigDecimal rate = baseRate.add(baseRate.multiply(fxSpread)).setScale(8, RoundingMode.HALF_UP);
         LocalDateTime expiresAt = LocalDateTime.now().plusSeconds(rateQuoteValiditySeconds);
 
         RateQuote quote = new RateQuote();
@@ -194,7 +208,18 @@ public class B2bTransferService {
         CustomerAccount account = accountRepository.findByIban(request.sourceIban())
                 .orElseThrow(() -> new NoSuchElementException("Account not found: " + request.sourceIban()));
 
-        BigDecimal effectiveRate = BASE_RATE.add(BASE_RATE.multiply(fxSpread));
+        // Whitelist-Check: Zieladresse muss ACTIVE im Adressbuch des Kunden stehen (MiCA / FATF Travel Rule)
+        addressBookRepository
+                .findByCustomerAccountIdAndWalletAddressAndStatus(
+                        account.getId(), request.destinationWallet(), AddressStatus.ACTIVE)
+                .orElseThrow(() -> {
+                    log.warn("[B2B] Whitelist block: wallet={} account={}",
+                            request.destinationWallet(), account.getCustomerId());
+                    return new ComplianceBlockException(request.destinationWallet(), "NOT_WHITELISTED");
+                });
+
+        BigDecimal baseRate = fxRateService.getBaseRate(request.currency());
+        BigDecimal effectiveRate = baseRate.add(baseRate.multiply(fxSpread));
         if (request.rateQuoteId() != null) {
             RateQuote quote = rateQuoteRepository.findByIdAndStatus(request.rateQuoteId(), QuoteStatus.ACTIVE)
                     .orElseThrow(() -> new IllegalArgumentException("Rate quote invalid: " + request.rateQuoteId()));
@@ -254,6 +279,9 @@ public class B2bTransferService {
             workflow.setStatus(ApprovalStatus.EXPIRED);
             approvalRepository.save(workflow);
             throw new IllegalStateException("Approval window expired");
+        }
+        if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
+            throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
         }
         workflow.setApproverId(request.approverId());
         workflow.setStatus(ApprovalStatus.APPROVED);

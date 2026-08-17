@@ -37,4 +37,25 @@ public class HttpN8nWebhookClient implements N8nWebhookClient {
                 })
                 .toBodilessEntity();
     }
+
+    @Override
+    public void notifyAddressRevoked(String walletAddress, String customerId, String riskScore) {
+        var payload = java.util.Map.of(
+                "event", "ADDRESS_SANCTIONS_REVOKED",
+                "walletAddress", walletAddress,
+                "customerId", customerId,
+                "riskScore", riskScore
+        );
+        restClient.post()
+                .uri(webhookUrl)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(payload)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (req, response) -> {
+                    byte[] body = response.getBody().readAllBytes();
+                    throw new RuntimeException(
+                            "n8n webhook error [" + response.getStatusCode() + "]: " + new String(body));
+                })
+                .toBodilessEntity();
+    }
 }

@@ -55,6 +55,13 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("NOT_FOUND_001", ex.getMessage(), getTraceId()));
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
+        log.warn("[BAD REQUEST] {}", ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(new ErrorResponse("BIZ_001", ex.getMessage(), getTraceId()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("[BAD REQUEST] {}", ex.getMessage());

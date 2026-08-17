@@ -14,6 +14,7 @@ import de.atruvia.stablecoin.service.b2b.AddressBookService;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
 import de.atruvia.stablecoin.service.b2b.BulkPaymentService;
 import de.atruvia.stablecoin.service.b2b.ExportService;
+import de.atruvia.stablecoin.service.b2b.SanctionsBatchService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -40,15 +41,18 @@ public class B2bController {
     private final AddressBookService addressBookService;
     private final BulkPaymentService bulkPaymentService;
     private final ExportService exportService;
+    private final SanctionsBatchService sanctionsBatchService;
 
     public B2bController(B2bTransferService transferService,
                          AddressBookService addressBookService,
                          BulkPaymentService bulkPaymentService,
-                         ExportService exportService) {
-        this.transferService    = transferService;
-        this.addressBookService = addressBookService;
-        this.bulkPaymentService = bulkPaymentService;
-        this.exportService      = exportService;
+                         ExportService exportService,
+                         SanctionsBatchService sanctionsBatchService) {
+        this.transferService      = transferService;
+        this.addressBookService   = addressBookService;
+        this.bulkPaymentService   = bulkPaymentService;
+        this.exportService        = exportService;
+        this.sanctionsBatchService = sanctionsBatchService;
     }
 
     // ─── Transfer endpoints ───────────────────────────────────────────────────
@@ -84,7 +88,8 @@ public class B2bController {
             @PathVariable UUID id,
             @RequestBody ApproveTransferRequest request,
             Authentication auth) {
-        return ResponseEntity.ok(transferService.approve(id, request));
+        // approverId kommt aus dem JWT — Request-Body-Wert wird ignoriert
+        return ResponseEntity.ok(transferService.approve(id, new ApproveTransferRequest(auth.getName())));
     }
 
     @PostMapping("/transfers/{id}/reject")
@@ -92,7 +97,8 @@ public class B2bController {
             @PathVariable UUID id,
             @RequestBody ApproveTransferRequest request,
             Authentication auth) {
-        return ResponseEntity.ok(transferService.reject(id, request));
+        // approverId kommt aus dem JWT — Request-Body-Wert wird ignoriert
+        return ResponseEntity.ok(transferService.reject(id, new ApproveTransferRequest(auth.getName())));
     }
 
     @GetMapping("/rate-quote")
@@ -181,5 +187,11 @@ public class B2bController {
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .body(csv.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @PostMapping("/admin/sanctions-scan")
+    public ResponseEntity<String> triggerSanctionsScan(Authentication auth) {
+        sanctionsBatchService.runNightlySanctionsScan();
+        return ResponseEntity.ok("{\"message\":\"Sanctions scan completed\"}");
     }
 }
