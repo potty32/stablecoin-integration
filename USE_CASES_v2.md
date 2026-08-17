@@ -1096,6 +1096,94 @@ public void transitionTo(UUID txId, TransactionStatus targetStatus, String userI
 
 ---
 
+---
+
+## Ausfallsicherheits-Architektur (Reliability Patterns)
+
+### 1. Atomare Idempotenz (Race-Condition-frei)
+
+```
+Client A ──┐
+           ├── POST /transfers (X-Idempotency-Key: abc)
+Client B ──┘
+
+persistInitialTransaction() [@Transactional]
+  ├── findByIdempotencyKey(abc)          ← Check INSIDE @Transactional
+  ├── [gefunden] → IdempotencyConflictException → HTTP 409
+  └── [nicht gefunden] → TX INSERT
+       DB-UNIQUE-Constraint (idempotency_key) fängt Race-Conditions ab
+```
+
+- Check und Insert laufen in **einer** `@Transactional` — keine Race Condition möglich
+- DB `UNIQUE`-Constraint ist die zweite Sicherheitslinie → `DataIntegrityViolationException` → 409
+
+### 2. Crash-Recovery via Transactional Outbox (SUBMIT_TO_BLOCKCHAIN)
+
+```
+FUNDS_HELD committed ──→ "SUBMIT_TO_BLOCKCHAIN" OutboxMessage committed
+     (REQUIRES_NEW)            (in derselben REQUIRES_NEW-TX)
+
+Wenn System nach FUNDS_HELD crasht:
+  OutboxProcessor (alle 5s) liest PENDING SUBMIT_TO_BLOCKCHAIN Nachrichten
+  └── TX-Status prüfen:
+        SETTLED/FAILED → OutboxMsg = SENT (bereits erledigt)
+        SUBMITTED + circleId → Circle pollen → SETTLED oder FAILED
+        FUNDS_HELD ohne circleId → ERROR-Alert (manueller Eingriff)
+```
+
+**Invariante:** Solange die SUBMIT_TO_BLOCKCHAIN OutboxMessage in `PENDING` ist,
+wird der OutboxProcessor bis zu MAX_ATTEMPTS=5 versuchen die TX zu finalisieren.
+
+### 3. Circuit Breaker + Retry für externe Systeme
+
+| System | Retry | Circuit Breaker | Fallback |
+|---|---|---|---|
+| Chainalysis | — | `@CircuitBreaker(chainalysis)` | Fail-Closed (403) |
+| Taurus Custody | 2x, 1s Backoff | `@CircuitBreaker(taurus-custody)` | `transitionToFailed()` + Hold-Release |
+| Circle Wallet | 3x, 500ms Backoff | `@CircuitBreaker(circle-wallet)` | `transitionToFailed()` + Hold-Release |
+| Core Banking | 3x, 500ms Backoff | `@CircuitBreaker(core-banking)` | `transitionToFailed()` + Hold-Release |
+
+**Pattern:** Alle externen Aufrufe laufen über `self.*`-Wrapper-Methoden (Spring AOP-Proxy
+für Resilience4j). Bei erschöpften Retries greift der Fallback, der atomar (REQUIRES_NEW)
+den Status auf FAILED setzt und den Hold via `CoreBankingClient.releaseHold()` freigibt.
+
+### 4. Auto-Hold-Release bei FAILED
+
+```
+FUNDS_HELD/SUBMITTED → transitionToFailed() [REQUIRES_NEW]
+  ├── validateTransition(current, FAILED)
+  ├── [current ∈ {FUNDS_HELD, SUBMITTED} AND holdId != null]
+  │     → coreBankingClient.releaseHold(holdId)   ← automatisch!
+  ├── tx.status = FAILED, failureReason gesetzt
+  └── OutboxMessage TRANSACTION_FAILED
+```
+
+**Invariante:** Nach jedem FAILED-Übergang aus FUNDS_HELD oder SUBMITTED ist der
+EUR-Hold immer freigegeben — kein manueller Cleanup notwendig.
+
+### 5. Outbox-Recovery Sequenz (Crash nach FUNDS_HELD)
+
+```
+Normaler Betrieb:        [FUNDS_HELD] ─→ [SUBMITTED] ─→ [SETTLED]
+                              ↓
+                   SUBMIT_TO_BLOCKCHAIN (OutboxMsg PENDING)
+
+Crash-Recovery:          [System startet neu]
+                              ↓
+                   OutboxProcessor liest SUBMIT_TO_BLOCKCHAIN
+                              ↓
+                   TX-Status = SUBMITTED, circleId gesetzt
+                              ↓
+                   circleWalletClient.getTransactionStatus(circleId)
+                         ↙              ↘
+                   COMPLETE            FAILED
+                      ↓                  ↓
+                 SETTLED            transitionToFailed()
+             (blockchainHash)       (Hold freigegeben)
+```
+
+---
+
 ## Technologie-Übersicht
 
 | Schicht | Technologie |

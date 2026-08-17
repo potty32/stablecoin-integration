@@ -23,6 +23,32 @@ app:
     dev-mode: true
 
 resilience4j:
+  retry:
+    instances:
+      circle-wallet:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.net.SocketTimeoutException
+          - java.lang.RuntimeException
+        ignore-exceptions:
+          - de.atruvia.stablecoin.exception.ComplianceBlockException
+          - de.atruvia.stablecoin.exception.TaurusLimitExceededException
+      taurus-custody:
+        max-attempts: 2
+        wait-duration: 1s
+        retry-exceptions:
+          - java.io.IOException
+          - java.lang.RuntimeException
+        ignore-exceptions:
+          - de.atruvia.stablecoin.exception.TaurusLimitExceededException
+      core-banking:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.lang.RuntimeException
   circuitbreaker:
     instances:
       circle-wallet:

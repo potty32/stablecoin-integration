@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,4 +32,8 @@ public interface StablecoinTransactionRepository extends JpaRepository<Stablecoi
     List<StablecoinTransaction> findByStatusAndCreatedAtBetween(TransactionStatus status, LocalDateTime from, LocalDateTime to);
     Optional<StablecoinTransaction> findTopByCustomerAccountIdAndTypeAndStatusOrderByCreatedAtDesc(
             UUID customerAccountId, TransactionType type, TransactionStatus status);
+
+    Optional<StablecoinTransaction> findByCircleTransactionId(String circleTransactionId);
+
+    List<StablecoinTransaction> findByStatusIn(Collection<TransactionStatus> statuses);
 }

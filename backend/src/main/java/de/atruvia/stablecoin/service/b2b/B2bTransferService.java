@@ -126,9 +126,8 @@ public class B2bTransferService {
     // ── Public API ─────────────────────────────────────────────────────────────
 
     public TransactionResponse initiate(String idempotencyKey, InitiateTransferRequest request, String initiatorId) {
-        txRepository.findByIdempotencyKey(idempotencyKey)
-                .ifPresent(ex -> { throw new IdempotencyConflictException(ex.getId()); });
-
+        // Idempotenz-Check läuft atomar in persistInitialTransaction() [@Transactional]
+        // DB-UNIQUE-Constraint auf idempotency_key ist die zweite Sicherheitslinie
         InitResult init = self.persistInitialTransaction(idempotencyKey, request, initiatorId);
 
         if (init.requiresApproval()) {
@@ -237,6 +236,11 @@ public class B2bTransferService {
         tx.setStatus(FUNDS_HELD);
         tx.setHoldId(holdId);
         txRepository.save(tx);
+        // Recovery-Trigger: SUBMIT_TO_BLOCKCHAIN wird in derselben REQUIRES_NEW-TX committed.
+        // Wenn das System nach FUNDS_HELD crasht, liest der OutboxProcessor diese Nachricht
+        // beim Neustart und finalisiert die TX kontrolliert (poll Circle / release hold).
+        saveOutboxMessage(txId, "SUBMIT_TO_BLOCKCHAIN",
+                String.format("{\"txId\":\"%s\",\"holdId\":\"%s\"}", txId, holdId));
         saveTransitionLog(txId, COMPLIANCE_CHECKED, FUNDS_HELD, userId,
                 "EUR-Hold angelegt: holdId=" + holdId);
         log.info("[STATE-MACHINE] tx={} {} → FUNDS_HELD holdId={}", txId, COMPLIANCE_CHECKED, holdId);
@@ -301,6 +305,11 @@ public class B2bTransferService {
 
     @Transactional
     public InitResult persistInitialTransaction(String idempotencyKey, InitiateTransferRequest request, String initiatorId) {
+        // ATOMARE Idempotenz: Check und Insert in derselben @Transactional
+        // DB-UNIQUE-Constraint auf idempotency_key fängt Race Conditions auf DB-Ebene ab
+        txRepository.findByIdempotencyKey(idempotencyKey)
+                .ifPresent(existing -> { throw new IdempotencyConflictException(existing.getId()); });
+
         CustomerAccount account = accountRepository.findByIban(request.sourceIban())
                 .orElseThrow(() -> new NoSuchElementException("Account not found: " + request.sourceIban()));
 
@@ -421,6 +430,53 @@ public class B2bTransferService {
         });
     }
 
+    // ── @Retry + @CircuitBreaker Wrapper (via self für AOP-Proxy) ─────────────
+
+    @io.github.resilience4j.retry.annotation.Retry(name = "taurus-custody")
+    @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "taurus-custody", fallbackMethod = "taurusSubmitFallback")
+    public TaurusTransactionResponseDto submitToTaurus(StablecoinTransaction tx, String userId) {
+        return taurusCustodyClient.signAndSubmit(new TaurusTransactionRequestDto(
+                tx.getCurrency() + "_POLYGON",
+                tx.getCustomerAccount().getWalletAddress(),
+                tx.getDestinationWallet(),
+                tx.getAmountStablecoin().toPlainString(),
+                new TaurusTransactionRequestDto.Metadata(tx.getId().toString(), tx.getCustomerAccount().getCustomerId())));
+    }
+
+    public TaurusTransactionResponseDto taurusSubmitFallback(StablecoinTransaction tx, String userId, Throwable ex) {
+        log.error("[CB/RETRY] Taurus unavailable for tx={}: {}", tx.getId(), ex.getMessage());
+        self.transitionToFailed(tx.getId(), "TAURUS_UNAVAILABLE: " + ex.getMessage(), userId);
+        throw new IllegalStateException("Taurus nicht erreichbar — TX abgebrochen, Hold freigegeben", ex);
+    }
+
+    @io.github.resilience4j.retry.annotation.Retry(name = "circle-wallet")
+    @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "circle-wallet", fallbackMethod = "circleTransferFallback")
+    public CircleTransferResponseDto submitToCircle(StablecoinTransaction tx, String userId) {
+        return circleWalletClient.initiateTransfer(new CircleTransferRequestDto(
+                tx.getIdempotencyKey(),
+                new CircleTransferRequestDto.Source("wallet", "BANK_MASTER_WALLET_ID"),
+                new CircleTransferRequestDto.Destination("blockchain", tx.getDestinationWallet(), "MATIC"),
+                new CircleTransferRequestDto.Amount(tx.getAmountStablecoin().toPlainString(), tx.getCurrency().name())));
+    }
+
+    public CircleTransferResponseDto circleTransferFallback(StablecoinTransaction tx, String userId, Throwable ex) {
+        log.error("[CB/RETRY] Circle unavailable for tx={}: {}", tx.getId(), ex.getMessage());
+        self.transitionToFailed(tx.getId(), "CIRCLE_UNAVAILABLE: " + ex.getMessage(), userId);
+        throw new IllegalStateException("Circle nicht erreichbar — TX abgebrochen, Hold freigegeben", ex);
+    }
+
+    @io.github.resilience4j.retry.annotation.Retry(name = "circle-wallet")
+    @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "circle-wallet", fallbackMethod = "pollCircleStatusFallback")
+    public CircleTransactionStatusDto pollCircleStatus(String circleId, UUID txId, String userId) {
+        return circleWalletClient.getTransactionStatus(circleId);
+    }
+
+    public CircleTransactionStatusDto pollCircleStatusFallback(String circleId, UUID txId, String userId, Throwable ex) {
+        log.error("[CB/RETRY] Circle poll unavailable for tx={} circleId={}: {}", txId, circleId, ex.getMessage());
+        self.transitionToFailed(txId, "CIRCLE_POLL_UNAVAILABLE: " + ex.getMessage(), userId);
+        throw new IllegalStateException("Circle Status-Abfrage nicht erreichbar — TX abgebrochen, Hold freigegeben", ex);
+    }
+
     // ── Kern-Orchestration ────────────────────────────────────────────────────
 
     private TransactionResponse executeTransferFlow(StablecoinTransaction tx, String userId) {
@@ -435,27 +491,19 @@ public class B2bTransferService {
             self.transitionToFundsHeld(txId, hold.holdId(), userId);
             log.info("[B2B] hold={} tx={}", hold.holdId(), txId);
 
-            TaurusTransactionResponseDto taurus = taurusCustodyClient.signAndSubmit(
-                    new TaurusTransactionRequestDto(
-                            tx.getCurrency() + "_POLYGON",
-                            tx.getCustomerAccount().getWalletAddress(),
-                            tx.getDestinationWallet(),
-                            tx.getAmountStablecoin().toPlainString(),
-                            new TaurusTransactionRequestDto.Metadata(txId.toString(), tx.getCustomerAccount().getCustomerId())));
+            // Taurus: @Retry(2x) + @CircuitBreaker — bei Ausfall: FAILED + Hold freigeben
+            TaurusTransactionResponseDto taurus = self.submitToTaurus(tx, userId);
             log.info("[B2B] taurus={} tx={}", taurus.id(), txId);
 
             self.transitionTo(txId, SUBMITTED, userId);
 
-            CircleTransferResponseDto circleInit = circleWalletClient.initiateTransfer(
-                    new CircleTransferRequestDto(
-                            tx.getIdempotencyKey(),
-                            new CircleTransferRequestDto.Source("wallet", "BANK_MASTER_WALLET_ID"),
-                            new CircleTransferRequestDto.Destination("blockchain", tx.getDestinationWallet(), "MATIC"),
-                            new CircleTransferRequestDto.Amount(tx.getAmountStablecoin().toPlainString(), tx.getCurrency().name())));
+            // Circle: @Retry(3x) + @CircuitBreaker — idempotency-key schützt vor Doppelbuchung
+            CircleTransferResponseDto circleInit = self.submitToCircle(tx, userId);
             self.persistCircleId(txId, circleInit.id());
             log.info("[B2B] circle={} tx={}", circleInit.id(), txId);
 
-            CircleTransactionStatusDto settled = circleWalletClient.getTransactionStatus(circleInit.id());
+            // Circle Status pollen: @Retry(3x) + @CircuitBreaker
+            CircleTransactionStatusDto settled = self.pollCircleStatus(circleInit.id(), txId, userId);
             if (!"COMPLETE".equals(settled.status())) {
                 throw new IllegalStateException("Circle not COMPLETE: " + settled.status());
             }
