@@ -35,6 +35,7 @@ resilience4j:
         ignore-exceptions:
           - de.atruvia.stablecoin.exception.ComplianceBlockException
           - de.atruvia.stablecoin.exception.TaurusLimitExceededException
+          - java.lang.IllegalStateException  # Fallback wirft IllegalStateException → nicht erneut versuchen
       taurus-custody:
         max-attempts: 2
         wait-duration: 1s
@@ -43,6 +44,7 @@ resilience4j:
           - java.lang.RuntimeException
         ignore-exceptions:
           - de.atruvia.stablecoin.exception.TaurusLimitExceededException
+          - java.lang.IllegalStateException  # Fallback wirft IllegalStateException → nicht erneut versuchen
       core-banking:
         max-attempts: 3
         wait-duration: 500ms

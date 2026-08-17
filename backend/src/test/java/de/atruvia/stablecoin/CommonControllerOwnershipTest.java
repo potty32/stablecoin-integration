@@ -11,7 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @AutoConfigureMockMvc
-class CommonControllerOwnershipTest extends AbstractIntegrationTest {
+class CommonControllerOwnershipTest extends AbstractLocalDbTest {
 
     @Autowired
     MockMvc mockMvc;

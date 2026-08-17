@@ -7,10 +7,10 @@ import de.atruvia.stablecoin.entity.*;
 import de.atruvia.stablecoin.exception.ComplianceBlockException;
 import de.atruvia.stablecoin.repository.*;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -18,14 +18,17 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@Transactional
-class B2bTransferIntegrationTest extends AbstractIntegrationTest {
+// KEIN @Transactional auf Klassenebene: REQUIRES_NEW-Service-Methoden brauchen committed Daten
+class B2bTransferIntegrationTest extends AbstractLocalDbTest {
 
     @Autowired B2bTransferService transferService;
     @Autowired CustomerAccountRepository accountRepository;
     @Autowired AddressBookRepository addressBookRepository;
     @Autowired StablecoinTransactionRepository txRepository;
     @Autowired AuditLogRepository auditLogRepository;
+    @Autowired ApprovalWorkflowRepository approvalRepository;
+    @Autowired OutboxMessageRepository outboxRepository;
+    @Autowired YieldPositionRepository yieldPositionRepository;
 
     private CustomerAccount b2bAccount;
     private static final String B2B_IBAN = "DE89370400440532013000";
@@ -37,15 +40,31 @@ class B2bTransferIntegrationTest extends AbstractIntegrationTest {
         b2bAccount = accountRepository.findByIban(B2B_IBAN).orElseThrow();
     }
 
+    @AfterEach
+    void cleanup() {
+        // Reihenfolge nach FK-Abhängigkeiten
+        outboxRepository.deleteAll();
+        auditLogRepository.deleteAll();
+        approvalRepository.deleteAll();
+        yieldPositionRepository.deleteAll();
+        txRepository.deleteAll();
+    }
+
     private AddressBook whitelistWallet(String wallet) {
-        AddressBook entry = new AddressBook();
-        entry.setCustomerAccount(b2bAccount);
-        entry.setLabel("Test Wallet");
-        entry.setWalletAddress(wallet);
-        entry.setCurrency(StablecoinCurrency.USDC);
-        entry.setRiskScore(RiskScore.LOW);
-        entry.setStatus(AddressStatus.ACTIVE);
-        return addressBookRepository.save(entry);
+        // findOrCreate: verhindert UniqueConstraint-Fehler bei mehrfachen Test-Ausführungen
+        return addressBookRepository
+                .findByCustomerAccountIdAndWalletAddressAndStatus(
+                        b2bAccount.getId(), wallet, AddressStatus.ACTIVE)
+                .orElseGet(() -> {
+                    AddressBook entry = new AddressBook();
+                    entry.setCustomerAccount(b2bAccount);
+                    entry.setLabel("Test Wallet");
+                    entry.setWalletAddress(wallet);
+                    entry.setCurrency(StablecoinCurrency.USDC);
+                    entry.setRiskScore(RiskScore.LOW);
+                    entry.setStatus(AddressStatus.ACTIVE);
+                    return addressBookRepository.save(entry);
+                });
     }
 
     // TC1: Happy-Path — Transfer < 25.000 EUR → SETTLED
@@ -110,14 +129,24 @@ class B2bTransferIntegrationTest extends AbstractIntegrationTest {
     @Test
     void complianceBlock_deadWallet_txIsBlocked() {
         // 0xDEAD... direkt in Whitelist (Chainalysis-Screen überspringen)
-        AddressBook deadEntry = new AddressBook();
-        deadEntry.setCustomerAccount(b2bAccount);
-        deadEntry.setLabel("Dead wallet");
-        deadEntry.setWalletAddress(DEAD_WALLET);
-        deadEntry.setCurrency(StablecoinCurrency.USDC);
-        deadEntry.setRiskScore(RiskScore.LOW);
-        deadEntry.setStatus(AddressStatus.ACTIVE);
-        addressBookRepository.save(deadEntry);
+        // Suche nach beliebigem Status (ggf. REVOKED vom Sanctions-Batch) und reaktiviere
+        var existingDead = addressBookRepository.findAll().stream()
+                .filter(a -> a.getCustomerAccount().getId().equals(b2bAccount.getId())
+                        && DEAD_WALLET.equals(a.getWalletAddress()))
+                .findFirst();
+        if (existingDead.isPresent()) {
+            existingDead.get().setStatus(AddressStatus.ACTIVE);
+            addressBookRepository.save(existingDead.get());
+        } else {
+            AddressBook deadEntry = new AddressBook();
+            deadEntry.setCustomerAccount(b2bAccount);
+            deadEntry.setLabel("Dead wallet");
+            deadEntry.setWalletAddress(DEAD_WALLET);
+            deadEntry.setCurrency(StablecoinCurrency.USDC);
+            deadEntry.setRiskScore(RiskScore.LOW);
+            deadEntry.setStatus(AddressStatus.ACTIVE);
+            addressBookRepository.save(deadEntry);
+        }
 
         assertThatThrownBy(() -> transferService.initiate(
                 UUID.randomUUID().toString(),

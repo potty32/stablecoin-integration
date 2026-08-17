@@ -34,6 +34,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        // Wenn bereits eine Authentifizierung im SecurityContext gesetzt ist
+        // (z.B. durch @WithMockUser in Tests), nicht überschreiben
+        if (SecurityContextHolder.getContext().getAuthentication() != null
+                && SecurityContextHolder.getContext().getAuthentication().isAuthenticated()) {
+            chain.doFilter(request, response);
+            return;
+        }
+
         String authHeader = request.getHeader("Authorization");
 
         if (devMode && (authHeader == null || authHeader.isBlank())) {
