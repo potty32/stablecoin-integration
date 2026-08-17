@@ -34,6 +34,64 @@
 | — | **NEU UC-26:** Institutionelle Adresse widerrufen |
 | — | **NEU:** Integrationstests (Testcontainers, 5 Tests, `src/test/`) |
 
+### 2026-08-17 — Commit `b8193eb` · State Machine Refactoring (BaFin/IT-Audit)
+
+| UC | Änderung |
+|---|---|
+| UC-01 | **State Machine:** `PENDING` → `CREATED`, `AWAITING_APPROVAL` → `PENDING_APPROVAL`, `PROCESSING` → `FUNDS_HELD` + `SUBMITTED`, `BLOCKED` → `FAILED` |
+| UC-01 | **Atomare Idempotenz:** Check + Insert in derselben `@Transactional` (Race Condition behoben) |
+| UC-01 | **Circuit Breaker + Retry:** Circle und Taurus über `@Retry`/`@CircuitBreaker` Wrapper abgesichert |
+| UC-01 | **Auto-Hold-Release:** FAILED aus FUNDS_HELD/SUBMITTED → `releaseHold()` automatisch |
+| UC-04 | **Status APPROVED:** TX bekommt eigenen APPROVED-Status (vorher implizit im ApprovalWorkflow) |
+| UC-05 | **Status REJECTED:** TX-Status `REJECTED` statt `FAILED` bei Ablehnung |
+| — | **Neu:** Status `EXPIRED` für abgelaufene Approval-Fenster |
+| — | **Neu:** `transitionTo()` mit ALLOWED_TRANSITIONS Map — ungültige Übergänge blocken mit IllegalStateException |
+
+### 2026-08-17 — Commit `26d0dad` · YieldPosition Entity (BaFin/IT-Audit)
+
+| UC | Änderung |
+|---|---|
+| UC-16 | **YieldPosition Entity:** `deposit()` erstellt jetzt YIELD_DEPOSIT TX (SETTLED, unveränderlich) + `YieldPosition` (ACTIVE) |
+| UC-16 | **Response:** `depositId` → `positionId` (YieldPosition.id statt TX.id) |
+| UC-17 | **YIELD_REDEEM TX:** `redeem()` erstellt eigenständige Auszahlungs-TX (Status: REDEEMED, Betrag: Anlage + Zinsen) |
+| UC-17 | **YieldPosition CLOSED:** Position-Lebenszyklus getrennt von TX-Lebenszyklus |
+| UC-18 | **getPosition():** Abfrage auf `YieldPositionRepository.findByStatus(ACTIVE)` — kein TX-Status-Hack mehr |
+| — | **NEU:** `TransactionType.YIELD_REDEEM`, `YieldStatus` Enum (ACTIVE/CLOSED) |
+
+### 2026-08-17 — Commit `7eff98d` · AuditLog relationales Schema (Performance + Indexierbarkeit)
+
+| UC | Änderung |
+|---|---|
+| UC-03 | **buildTimeline():** Kein Regex-Parsing mehr — direkte Abfrage per `findByTransactionIdOrderByTimestampAsc()` |
+| UC-22 | **buildTimeline():** Analog UC-03 |
+| — | **AuditLog-Schema:** `previous_state`/`new_state` JSONB entfernt, neue Spalten: `transactionId` (FK+Index), `fromStatus`, `toStatus`, `details` (TEXT) |
+| — | **TimelineEntry:** `(fromStatus, toStatus, performedBy, at, details)` statt `(status, at)` |
+| — | **V7-Migration:** Datenmigration (JSONB → Spalten) + Partial Index auf `transaction_id` |
+
+### 2026-08-17 — Commit `6431644` · Ausfallsicherheit (Resilience)
+
+| UC | Änderung |
+|---|---|
+| UC-01 | **SUBMIT_TO_BLOCKCHAIN Outbox:** Bei `FUNDS_HELD` wird Outbox-Nachricht committed → Crash-Recovery |
+| UC-01 | **Retry-Config:** `circle-wallet` (3x/500ms), `taurus-custody` (2x/1s), `core-banking` (3x/500ms) |
+| — | **OutboxProcessor:** `recoverSubmitToBlockchain()` — finalisiert SUBMITTED-TX via Circle-API-Poll nach Neustart |
+
+### 2026-08-17 — Commits `a7fc187` + `19e41ba` · Testabdeckung 13% → 62,7%
+
+| Testklasse | TCs | Bereich |
+|---|---|---|
+| `OutboxProcessorTest` | 11 | Recovery-Logik |
+| `ComplianceServiceTest` | 5 | AML-Screening |
+| `GlobalExceptionHandlerTest` | 10 | Alle HTTP-Fehlercodes |
+| `ExportServiceTest` | 8 | CAMT.053 + DATEV |
+| `BulkPaymentServiceTest` | 10 | CSV-Validierung |
+| `AddressBookServiceTest` | 7 | Whitelist-Management |
+| `InstitutionalAddressBookServiceTest` | 6 | Bank-weite Whitelist |
+| `B2bTransferIntegrationTest` | 4 | Transfer-Flows |
+| `B2bResilienceTest` | 4 | Idempotenz + Recovery |
+| `CommonControllerOwnershipTest` | 2 | Ownership-Check |
+| — | **99 gesamt** | **LINE: 62,7% \| CLASS: 86,7%** |
+
 ---
 
 ## Übersicht
