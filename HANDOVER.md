@@ -290,14 +290,59 @@ Auth-Guard schützt alle `/b2b/*` und `/b2c/*` Routen.
 
 ## 11. Offene Punkte / Nächste Schritte
 
-- **Kontostand-Anzeige im Frontend**: `GET /api/v1/accounts/{iban}/balance` ist vollständig implementiert, wird aber von keiner Frontend-Komponente aufgerufen. Sinnvoller nächster Schritt: Saldo-Widget in Formular-Header oder dediziertes Dashboard einbauen. Außerdem fehlt aktuell die Prüfung, ob die abgefragte IBAN dem eingeloggten Nutzer gehört (kein Ownership-Check im Controller).
-- **Rate-Quote — kein Live-FX-Kurs für USDC**: `BASE_RATE` ist hardcoded auf `1.0` für alle Währungen. Für EURC korrekt (1 EURC = 1 EUR), aber für USDC falsch — dort müsste der aktuelle EUR/USD-Marktkurs eingesetzt werden (z.B. ECB Reference Rate, Bloomberg, Refinitiv). Lösung: `FxRateService` einführen, der je nach Zielwährung entweder `1.0` (EURC) oder den aktuellen EUR/USD-Kurs (USDC) liefert. `BASE_RATE` im `B2bTransferService` durch diesen Service ersetzen.
-- **Adressbuch — Whitelist-Erzwingung fehlt**: Das Backend prüft beim Transfer-Initiieren aktuell NICHT, ob die Zieladresse im Adressbuch steht. Das Adressbuch ist heute nur UX-Helfer und Compliance-Dokumentation. Richtig wäre: `B2bTransferService` prüft vor dem Transfer gegen `AddressBookRepository` (findByCustomerAccountIdAndWalletAddressAndStatus → ACTIVE), andernfalls `ComplianceBlockException("NOT_WHITELISTED")`.
-- **Adressbuch — Chainalysis Sanctions-Batch**: Chainalysis stellt täglich aktualisierte Sanktionslisten bereit (OFAC SDN, EU-Konsolidierte Liste, Darknet-Adressen). Noch nicht implementiert: nächtlicher Batch-Job, der alle ACTIVE-Adressbucheinträge gegen neue Hochrisiko-Adressen abgleicht und betroffene Einträge auf REVOKED setzt (inkl. Kundenbenachrichtigung via n8n-Webhook).
-- **Adressbuch — Bank-weite institutionelle Whitelist**: Chainalysis bietet vorgeprüfte Adressen bekannter regulierter Gegenparteien (Coinbase Custody, Kraken, andere lizenzierte Custodians). Diese könnten als globale, bank-weite Whitelist eingepflegt werden, die allen Kunden automatisch zur Verfügung steht — ohne individuelle Prüfung je Kunde. Erfordert ein neues Entity `InstitutionalAddressBook` ohne `customer_account_id`-Bezug.
-- **Angular Production Build**: `ng build --configuration production` noch nicht verifiziert
-- **Railway Deploy**: Prod-Secrets (Circle/Taurus/Chainalysis API-Keys) fehlen noch
-- **mTLS-Zertifikate**: Für Railway manuell bereitstellen (`SSL_KEYSTORE_PATH`)
-- **IAM für Approver**: `approverId` ist freier String — kein echtes IAM-System
-- **OWASP CVE-Scan**: CI eingerichtet, braucht `NVD_API_KEY` als GitHub Secret
-- **Integrationstests**: `@SpringBootTest` mit Testcontainers noch nicht implementiert
+> Stand: 2026-08-17 | ✅ = erledigt | 🔴 = offen/kritisch | 🟡 = offen/mittel | 🔵 = offen/niedrig
+
+### ✅ Erledigte Punkte (diese Session)
+- ~~Kontostand-Anzeige im Frontend~~ → Balance-Widget in `TransferListComponent`, Ownership-Check im Controller
+- ~~Rate-Quote Live-FX-Kurs für USDC~~ → `FxRateService` + `HttpEcbRateClient` (ECB-Referenzkurs)
+- ~~Adressbuch Whitelist-Erzwingung~~ → Transfer schlägt mit 403 `NOT_WHITELISTED` fehl
+- ~~Adressbuch Sanctions-Batch~~ → `SanctionsBatchService` (cron 02:00, REVOKED + n8n)
+- ~~Adressbuch institutionelle Whitelist~~ → `InstitutionalAddressBook` Entity + 3 REST-Endpunkte
+- ~~IAM für Approver~~ → `approverId` aus JWT, Selbst-Genehmigung blockiert
+- ~~Integrationstests~~ → 99 Tests (Unit + Integration), Coverage 62,7% LINE
+
+---
+
+### Testabdeckung (Ziel: ≥ 80% LINE für Produktions-Abnahme)
+
+**Aktueller Stand: 62,7% LINE / 48,4% BRANCH (99 Tests)**
+
+| Priorität | Maßnahme | Erwarteter Gewinn |
+|---|---|---|
+| 🔴 **Hoch** | **`controller/b2b` via MockMvc** — alle 14 REST-Endpunkte: HTTP-Status, Request-Validierung, `X-Idempotency-Key`-Pflicht | +15–20pp LINE |
+| 🔴 **Hoch** | **`service/b2c` Unit-Tests** — P2P, Remittance, Micropayment analog zu `B2cYieldServiceTest` (aktuell 40%) | +10–15pp LINE |
+| 🟡 **Mittel** | **`client/http` Contract-Tests** — WireMock gegen Circle/Taurus/ECB-API-Spezifikation (kein echter API-Key nötig, `@Profile("prod")`) | +8pp LINE |
+
+Ziel: **≥ 80% LINE, ≥ 70% BRANCH** — für BaFin/IT-Audit erforderlich.
+
+---
+
+### Security Test (Penetration-Test)
+
+🔴 **Kritisch vor Produktivbetrieb** — folgende Bereiche müssen geprüft werden:
+
+| Testbereich | Beschreibung | Tool-Empfehlung |
+|---|---|---|
+| **JWT-Sicherheit** | Algorithmus-Downgrade (alg=none), schwache Secrets, Token-Replay | jwt_tool, Burp Suite |
+| **Authentifizierung** | Bypasses in Dev-Mode (`app.security.dev-mode`), Brute-Force auf Login | OWASP ZAP |
+| **Authorization** | IDOR: Ownership-Check auf alle `/api/v1/accounts/{iban}` und `/api/v1/transactions/{id}` Endpunkte, Horizontal Privilege Escalation | Burp Suite Pro |
+| **Input Validation** | SQL-Injection in Query-Parametern (z.B. `?status=`), XSS in String-Feldern, Path-Traversal | OWASP ZAP, SQLMap |
+| **API Rate Limiting** | Kein Rate-Limiting implementiert — Brute-Force und DoS möglich | k6, Artillery |
+| **Dependency-CVEs** | Bekannte Schwachstellen in Spring Boot 3.3.5, Jackson, JJWT | `mvn dependency-check:check` (braucht `NVD_API_KEY` als GitHub Secret) |
+| **mTLS / TLS** | Zertifikats-Validierung in Prod (`SSL_KEYSTORE_PATH`), Cipher-Suite-Prüfung | testssl.sh, sslyze |
+| **Blockchain** | On-Chain-Transaktionsverifizierung, Wallet-Adress-Validierung | Manuelle Review |
+
+**Empfohlene Vorgehensweise:**
+1. OWASP ZAP Automated Scan gegen `http://localhost:8080` (dev-Umgebung)
+2. Burp Suite Pro für manuelle IDOR- und Auth-Tests mit zwei verschiedenen JWT-Tokens
+3. `mvn org.owasp:dependency-check-maven:check` (benötigt `NVD_API_KEY` als GitHub Secret: Settings → Secrets → Actions)
+4. Vor Railway-Deploy: `testssl.sh` gegen die Prod-URL
+
+---
+
+### Deployment (Prod)
+
+- 🟡 **Angular Production Build**: `ng build --configuration production` noch nicht verifiziert
+- 🔵 **Railway Deploy**: Prod-Secrets (Circle/Taurus/Chainalysis API-Keys) eintragen
+- 🔵 **mTLS-Zertifikate**: Für Railway manuell bereitstellen (`SSL_KEYSTORE_PATH`)
+- 🟡 **OWASP CVE-Scan CI**: `NVD_API_KEY` als GitHub Secret hinterlegen (Settings → Secrets → Actions)
