@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin.entity;
 
+import de.atruvia.stablecoin.config.TenantEntityListener;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -7,6 +8,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "stablecoin_transaction")
+@EntityListeners(TenantEntityListener.class)
 public class StablecoinTransaction {
 
     @Id
@@ -84,6 +86,9 @@ public class StablecoinTransaction {
     @Column(name = "settled_at")
     private LocalDateTime settledAt;
 
+    @Column(name = "tenant_id", nullable = false, length = 50)
+    private String tenantId;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -140,4 +145,6 @@ public class StablecoinTransaction {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public LocalDateTime getSettledAt() { return settledAt; }
     public void setSettledAt(LocalDateTime settledAt) { this.settledAt = settledAt; }
+    public String getTenantId() { return tenantId; }
+    public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 }

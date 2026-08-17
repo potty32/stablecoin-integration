@@ -1,11 +1,13 @@
 package de.atruvia.stablecoin.entity;
 
+import de.atruvia.stablecoin.config.TenantEntityListener;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
 @Table(name = "audit_log")
+@EntityListeners(TenantEntityListener.class)
 public class AuditLog {
 
     @Id
@@ -41,6 +43,9 @@ public class AuditLog {
     @Column(name = "details", columnDefinition = "TEXT")
     private String details;
 
+    @Column(name = "tenant_id", nullable = false, length = 50)
+    private String tenantId;
+
     @PrePersist
     protected void onCreate() {
         timestamp = LocalDateTime.now();
@@ -64,4 +69,6 @@ public class AuditLog {
     public void setToStatus(TransactionStatus toStatus) { this.toStatus = toStatus; }
     public String getDetails() { return details; }
     public void setDetails(String details) { this.details = details; }
+    public String getTenantId() { return tenantId; }
+    public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 }

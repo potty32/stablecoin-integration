@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin.entity;
 
+import de.atruvia.stablecoin.config.TenantEntityListener;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -7,6 +8,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "yield_position")
+@EntityListeners(TenantEntityListener.class)
 public class YieldPosition {
 
     @Id
@@ -36,6 +38,9 @@ public class YieldPosition {
     @Column(name = "deposit_transaction_id")
     private UUID depositTransactionId;
 
+    @Column(name = "tenant_id", nullable = false, length = 50)
+    private String tenantId;
+
     @PrePersist
     void prePersist() {
         if (status == null) status = YieldStatus.ACTIVE;
@@ -58,4 +63,6 @@ public class YieldPosition {
     public void setStatus(YieldStatus status) { this.status = status; }
     public UUID getDepositTransactionId() { return depositTransactionId; }
     public void setDepositTransactionId(UUID depositTransactionId) { this.depositTransactionId = depositTransactionId; }
+    public String getTenantId() { return tenantId; }
+    public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 }

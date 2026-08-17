@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin.config;
 
+import de.atruvia.stablecoin.config.TenantContext;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -45,9 +46,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String authHeader = request.getHeader("Authorization");
 
         if (devMode && (authHeader == null || authHeader.isBlank())) {
-            // Dev-Modus: ohne Token mit Mock-User durchlassen
+            // Dev-Modus: ohne Token mit Default-Mandant durchlassen
             setAuthentication("dev-user");
-            chain.doFilter(request, response);
+            TenantContext.set("tenant-default");
+            try {
+                chain.doFilter(request, response);
+            } finally {
+                TenantContext.clear();
+            }
             return;
         }
 
@@ -61,8 +67,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                         .getPayload();
 
                 String userId = claims.getSubject();
+                String tenantId = claims.get("tenant", String.class);
                 MDC.put("userId", userId);
+                MDC.put("tenantId", tenantId != null ? tenantId : "tenant-default");
                 setAuthentication(userId);
+                TenantContext.set(tenantId != null ? tenantId : "tenant-default");
             } catch (Exception e) {
                 log.warn("[JWT] Invalid token: {}", e.getMessage());
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid or expired token");
@@ -70,7 +79,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
         }
 
-        chain.doFilter(request, response);
+        try {
+            chain.doFilter(request, response);
+        } finally {
+            TenantContext.clear();
+            MDC.remove("tenantId");
+        }
     }
 
     private void setAuthentication(String userId) {

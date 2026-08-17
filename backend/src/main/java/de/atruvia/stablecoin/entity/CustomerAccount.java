@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin.entity;
 
+import de.atruvia.stablecoin.config.TenantEntityListener;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -7,6 +8,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "customer_account")
+@EntityListeners(TenantEntityListener.class)
 public class CustomerAccount {
 
     @Id
@@ -46,6 +48,9 @@ public class CustomerAccount {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "tenant_id", nullable = false, length = 50)
+    private String tenantId;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -78,4 +83,6 @@ public class CustomerAccount {
     public void setStatus(AccountStatus status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public String getTenantId() { return tenantId; }
+    public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 }

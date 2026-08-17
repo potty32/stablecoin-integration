@@ -34,7 +34,8 @@ public class SecurityConfig {
                                 "/actuator/info",
                                 "/api-docs/**",
                                 "/swagger-ui/**",
-                                "/swagger-ui.html"
+                                "/swagger-ui.html",
+                                "/api/v1/auth/dev-token"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

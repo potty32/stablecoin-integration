@@ -3,7 +3,20 @@
     "allow": [
       "Bash(tmux list-sessions *)",
       "Bash(screen -list)",
-      "Read(//home/kasm-user/**)"
+      "Read(//home/kasm-user/**)",
+      "Bash(java -version)",
+      "Bash(mvn -version)",
+      "Bash(psql --version)",
+      "Bash(npm --version)",
+      "Bash(sudo apt-get update -qq)",
+      "Bash(sudo apt-get install -y openjdk-21-jdk maven postgresql postgresql-client)",
+      "Bash(sudo service postgresql start)",
+      "Bash(sudo service postgresql status)",
+      "Bash(sudo -u postgres psql -c \"\\\\du\")",
+      "Bash(sudo -u postgres psql -c \"CREATE USER stableuser WITH PASSWORD 'stablepass';\")",
+      "Bash(sudo -u postgres psql -c \"\\\\l\")",
+      "Bash(sudo -u postgres psql -c \"CREATE DATABASE stabledb OWNER stableuser;\")",
+      "Bash(sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE stabledb TO stableuser;\")"
     ]
   }
 }

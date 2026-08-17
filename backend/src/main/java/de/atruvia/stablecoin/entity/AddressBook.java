@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin.entity;
 
+import de.atruvia.stablecoin.config.TenantEntityListener;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -7,6 +8,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "address_book",
        uniqueConstraints = @UniqueConstraint(columnNames = {"customer_account_id", "wallet_address"}))
+@EntityListeners(TenantEntityListener.class)
 public class AddressBook {
 
     @Id
@@ -38,6 +40,9 @@ public class AddressBook {
     @Column(nullable = false, length = 10)
     private AddressStatus status;
 
+    @Column(name = "tenant_id", nullable = false, length = 50)
+    private String tenantId;
+
     @PrePersist
     protected void onCreate() {
         verifiedAt = LocalDateTime.now();
@@ -61,4 +66,6 @@ public class AddressBook {
     public void setVerifiedAt(LocalDateTime verifiedAt) { this.verifiedAt = verifiedAt; }
     public AddressStatus getStatus() { return status; }
     public void setStatus(AddressStatus status) { this.status = status; }
+    public String getTenantId() { return tenantId; }
+    public void setTenantId(String tenantId) { this.tenantId = tenantId; }
 }
