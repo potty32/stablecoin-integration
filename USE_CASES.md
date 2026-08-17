@@ -1,9 +1,13 @@
-# Use Cases — Atruvia Stablecoin Integration Platform
+# Use Cases — Atruvia Stablecoin Integration Platform (Changelog-Dokument)
 
-> Erstellt: 2026-08-17 | Letzte Aktualisierung: 2026-08-17  
-> Alle Use Cases mit Summary, fachlicher Einordnung, beteiligten Klassen,
-> Sequenzdiagramm (ASCII) und Code-Schnipseln.  
-> Vollständig aktualisierte Version: siehe `USE_CASES_v2.md`
+> **Dieses Dokument ist ein Changelog und historisches Referenzdokument.**
+> Es dokumentiert alle Änderungen pro Commit, enthält aber den ursprünglichen UC-Inhalt
+> (Stand der Ersterstellung) — die UC-Abschnitte sind NICHT vollständig aktualisiert.
+>
+> ➡️ **Für den aktuellen, vollständigen Stand aller 26 Use Cases: `USE_CASES_v2.md` lesen.**
+>
+> Erstellt: 2026-08-17 | Changelog zuletzt aktualisiert: 2026-08-17  
+> Commit-Abdeckung: `9252df7` (Erstellung) → `252fb57` (Tagesabschluss)
 
 ---
 
