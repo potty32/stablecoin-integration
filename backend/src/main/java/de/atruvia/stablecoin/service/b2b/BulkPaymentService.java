@@ -1,10 +1,13 @@
 package de.atruvia.stablecoin.service.b2b;
 
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.dto.request.b2b.InitiateTransferRequest;
 import de.atruvia.stablecoin.dto.response.BulkPaymentResult;
 import de.atruvia.stablecoin.dto.response.BulkRowResult;
 import de.atruvia.stablecoin.dto.response.TransactionResponse;
+import de.atruvia.stablecoin.entity.TenantSettings;
 import de.atruvia.stablecoin.entity.StablecoinCurrency;
+import de.atruvia.stablecoin.exception.BulkPaymentThresholdException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -31,9 +34,12 @@ public class BulkPaymentService {
     private static final Pattern ETH_ADDRESS = Pattern.compile("^0x[0-9a-fA-F]{40}$");
 
     private final B2bTransferService transferService;
+    private final TenantSettingsService tenantSettingsService;
 
-    public BulkPaymentService(B2bTransferService transferService) {
+    public BulkPaymentService(B2bTransferService transferService,
+                               TenantSettingsService tenantSettingsService) {
         this.transferService = transferService;
+        this.tenantSettingsService = tenantSettingsService;
     }
 
     /**
@@ -126,7 +132,7 @@ public class BulkPaymentService {
                     String idempotencyKey = UUID.randomUUID().toString();
                     InitiateTransferRequest request = new InitiateTransferRequest(
                             sourceIban, destinationWallet, amountEur, currency,
-                            null, null, reference);
+                            null, null, reference, null, null, null);
                     TransactionResponse response = transferService.initiate(idempotencyKey, request, initiatorId);
                     rows.add(new BulkRowResult(dataRowNumber, destinationWallet, amountStr,
                             "OK", "Transaction created", response.transactionId().toString()));
@@ -144,7 +150,21 @@ public class BulkPaymentService {
             throw new IllegalArgumentException("Failed to parse CSV file: " + e.getMessage(), e);
         }
 
-        return new BulkPaymentResult(successful + failed, successful, failed, rows);
+        BulkPaymentResult result = new BulkPaymentResult(successful + failed, successful, failed, rows);
+
+        // G-13: Mindest-Erfolgsquote prüfen
+        TenantSettings settings = tenantSettingsService.get(TenantContext.get());
+        double minRate = settings.getBulkMinSuccessRate().doubleValue();
+        if (minRate > 0.0 && (successful + failed) > 0) {
+            double actualRate = (double) successful / (successful + failed);
+            if (actualRate < minRate) {
+                log.error("[BulkPayment] Erfolgsquote {:.0f}% < Mindest-{:.0f}% — Batch als THRESHOLD_NOT_MET markiert",
+                        actualRate * 100, minRate * 100);
+                throw new BulkPaymentThresholdException(successful, successful + failed, minRate);
+            }
+        }
+
+        return result;
     }
 
     private BulkRowResult errorRow(int rowNumber, String wallet, String amount, String message) {

@@ -5,8 +5,10 @@ import de.atruvia.stablecoin.dto.response.TransactionResponse;
 import de.atruvia.stablecoin.entity.StablecoinCurrency;
 import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.entity.TransactionType;
+import de.atruvia.stablecoin.entity.TenantSettings;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
 import de.atruvia.stablecoin.service.b2b.BulkPaymentService;
+import de.atruvia.stablecoin.service.b2b.TenantSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,7 @@ import static org.mockito.Mockito.when;
 class BulkPaymentServiceTest {
 
     @Mock private B2bTransferService transferService;
+    @Mock private TenantSettingsService tenantSettingsService;
 
     private BulkPaymentService bulkPaymentService;
 
@@ -39,7 +42,10 @@ class BulkPaymentServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        bulkPaymentService = new BulkPaymentService(transferService);
+        // Default: kein Mindest-Erfolgsquote-Limit (Rückwärtskompatibilität)
+        TenantSettings defaultSettings = new TenantSettings();
+        when(tenantSettingsService.get(any())).thenReturn(defaultSettings);
+        bulkPaymentService = new BulkPaymentService(transferService, tenantSettingsService);
     }
 
     private MockMultipartFile csvFile(String content) {

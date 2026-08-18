@@ -48,7 +48,7 @@ class B2bStateMachineTest {
                 txRepository, null, null, outboxRepository,
                 auditLogRepository, null, null, null,
                 coreBankingClient, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private StablecoinTransaction txWithStatus(TransactionStatus status) {

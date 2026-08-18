@@ -206,6 +206,29 @@ public class B2bController {
     }
 
     /**
+     * G-10: CAMT.029 Rejection-Benachrichtigung für automatische Retouren (INBOUND_RETURN).
+     * ISO 20022 Unable-To-Apply Notification — ERP-Systeme verbuchen fehlgeschlagene Eingänge.
+     * Optional: since-Parameter (ISO-8601 DateTime, Default: letzte 24h).
+     */
+    @GetMapping("/export/camt029")
+    public ResponseEntity<byte[]> exportCamt029(
+            @RequestParam(required = false) String iban,
+            @RequestParam(required = false) String since,
+            Authentication auth) {
+        String resolvedIban = exportService.resolveIban(iban);
+        java.time.LocalDateTime sinceDateTime = since != null
+                ? java.time.LocalDateTime.parse(since)
+                : java.time.LocalDateTime.now().minusHours(24);
+        String xml      = exportService.generateCamt029(resolvedIban, sinceDateTime);
+        String filename = "camt029-" + resolvedIban + ".xml";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_XML)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(xml.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
      * Downloads SETTLED transactions as a DATEV-compatible CSV file.
      * Optional query param {@code iban}; defaults to the first available B2B IBAN.
      */

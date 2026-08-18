@@ -95,7 +95,7 @@ class B2bResilienceTest extends AbstractLocalDbTest {
     void sameIdempotencyKey_secondCallThrowsConflict() {
         String idempotencyKey = "idem-test-" + UUID.randomUUID();
         InitiateTransferRequest request = new InitiateTransferRequest(
-                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("100"), StablecoinCurrency.USDC, null, null, "Test");
+                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("100"), StablecoinCurrency.USDC, null, null, "Test", null, null, null);
 
         // Erster Aufruf: erfolgreich
         var result = transferService.initiate(idempotencyKey, request, "cust-b2b-001");
@@ -124,7 +124,7 @@ class B2bResilienceTest extends AbstractLocalDbTest {
 
         String idempotencyKey = "circle-fail-" + UUID.randomUUID();
         InitiateTransferRequest request = new InitiateTransferRequest(
-                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("200"), StablecoinCurrency.USDC, null, null, "Test");
+                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("200"), StablecoinCurrency.USDC, null, null, "Test", null, null, null);
 
         // Retry+CircuitBreaker: Fallback wirft IllegalStateException, das propagiert
         // (entweder direkt "Circle nicht erreichbar" oder nach Retry-Erschöpfung)
@@ -160,7 +160,7 @@ class B2bResilienceTest extends AbstractLocalDbTest {
 
         String idempotencyKey = "recovery-" + UUID.randomUUID();
         InitiateTransferRequest request = new InitiateTransferRequest(
-                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("300"), StablecoinCurrency.USDC, null, null, "Recovery-Test");
+                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("300"), StablecoinCurrency.USDC, null, null, "Recovery-Test", null, null, null);
 
         assertThatThrownBy(() -> transferService.initiate(idempotencyKey, request, "cust-b2b-001"))
                 .isInstanceOf(Exception.class);
@@ -216,7 +216,7 @@ class B2bResilienceTest extends AbstractLocalDbTest {
         // Normaler Transfer — lass ihn komplett durchlaufen
         String idempotencyKey = "outbox-check-" + UUID.randomUUID();
         InitiateTransferRequest request = new InitiateTransferRequest(
-                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("150"), StablecoinCurrency.USDC, null, null, "Outbox-Test");
+                B2B_IBAN, WHITELISTED_WALLET, new BigDecimal("150"), StablecoinCurrency.USDC, null, null, "Outbox-Test", null, null, null);
 
         var result = transferService.initiate(idempotencyKey, request, "cust-b2b-001");
         assertThat(result.status()).isEqualTo(TransactionStatus.SETTLED);

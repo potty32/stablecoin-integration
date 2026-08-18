@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import de.atruvia.stablecoin.exception.WebhookSignatureException;
 import de.atruvia.stablecoin.exception.PaymentSystemFrozenException;
 import de.atruvia.stablecoin.exception.SlippageExceededException;
+import de.atruvia.stablecoin.exception.BulkPaymentThresholdException;
 
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -23,6 +24,13 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(BulkPaymentThresholdException.class)
+    public ResponseEntity<ErrorResponse> handleBulkThreshold(BulkPaymentThresholdException ex) {
+        log.warn("[BULK] {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ErrorResponse("BIZ_006", ex.getMessage(), getTraceId()));
+    }
 
     @ExceptionHandler(SlippageExceededException.class)
     public ResponseEntity<ErrorResponse> handleSlippage(SlippageExceededException ex) {

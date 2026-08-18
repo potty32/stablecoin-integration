@@ -13,14 +13,12 @@ import de.atruvia.stablecoin.service.revenue.RevenueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+// G-14: PhoneHashService ersetzt statischen SHA-256-Salt
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.NoSuchElementException;
@@ -30,7 +28,6 @@ import java.util.UUID;
 public class B2cP2pService {
 
     private static final Logger log = LoggerFactory.getLogger(B2cP2pService.class);
-    private static final String PHONE_SALT = "atruvia-stablecoin-2026";
 
     private final StablecoinTransactionRepository txRepository;
     private final CustomerAccountRepository accountRepository;
@@ -38,6 +35,7 @@ public class B2cP2pService {
     private final AuditLogRepository auditLogRepository;
     private final CircleWalletClient circleWalletClient;
     private final RevenueService revenueService;
+    private final PhoneHashService phoneHashService;
 
     @Value("${app.revenue.fee-b2c:0.50}")
     private BigDecimal feeB2c;
@@ -48,13 +46,15 @@ public class B2cP2pService {
             PhoneAliasRepository phoneAliasRepository,
             AuditLogRepository auditLogRepository,
             CircleWalletClient circleWalletClient,
-            RevenueService revenueService) {
+            RevenueService revenueService,
+            PhoneHashService phoneHashService) {
         this.txRepository = txRepository;
         this.accountRepository = accountRepository;
         this.phoneAliasRepository = phoneAliasRepository;
         this.auditLogRepository = auditLogRepository;
         this.circleWalletClient = circleWalletClient;
         this.revenueService = revenueService;
+        this.phoneHashService = phoneHashService;
     }
 
     @Transactional
@@ -62,7 +62,7 @@ public class B2cP2pService {
         CustomerAccount account = accountRepository.findByIban(request.sourceIban())
                 .orElseThrow(() -> new NoSuchElementException("Account not found for IBAN: " + request.sourceIban()));
 
-        String hash = hashPhoneNumber(request.phoneNumber());
+        String hash = phoneHashService.hash(request.phoneNumber());
 
         PhoneAlias alias = new PhoneAlias();
         alias.setPhoneNumberHash(hash);
@@ -81,7 +81,7 @@ public class B2cP2pService {
         txRepository.findByIdempotencyKey(idempotencyKey)
                 .ifPresent(ex -> { throw new IdempotencyConflictException(ex.getId()); });
 
-        String recipientHash = hashPhoneNumber(request.recipientPhone());
+        String recipientHash = phoneHashService.hash(request.recipientPhone());
         PhoneAlias recipientAlias = phoneAliasRepository.findByPhoneNumberHash(recipientHash)
                 .orElseThrow(() -> new NoSuchElementException(
                         "No registered wallet for phone number: " + request.recipientPhone()));
@@ -131,20 +131,6 @@ public class B2cP2pService {
         );
     }
 
-    private String hashPhoneNumber(String phoneNumber) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String salted = PHONE_SALT + phoneNumber;
-            byte[] hash = digest.digest(salted.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(64);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
-    }
 
     private void saveAuditLog(UUID entityId, String entityType, String action,
                               String userId, String details) {

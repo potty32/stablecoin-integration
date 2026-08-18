@@ -23,6 +23,18 @@ import java.util.UUID;
 public interface StablecoinTransactionRepository extends JpaRepository<StablecoinTransaction, UUID> {
     Optional<StablecoinTransaction> findByIdempotencyKey(String idempotencyKey);
 
+    /** G-09: Idempotenz-Check nur für nicht-abgelaufene Einträge. */
+    @Query("SELECT t FROM StablecoinTransaction t WHERE t.idempotencyKey = :key " +
+           "AND (t.idempotencyExpiresAt IS NULL OR t.idempotencyExpiresAt > :now)")
+    Optional<StablecoinTransaction> findByIdempotencyKeyAndNotExpired(
+            @Param("key") String key, @Param("now") java.time.LocalDateTime now);
+
+    /** G-09: Löscht abgelaufene Idempotenz-Records (nur Terminal-Status-TXs). */
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("DELETE FROM StablecoinTransaction t WHERE t.idempotencyExpiresAt < :threshold " +
+           "AND t.status IN ('SETTLED','FAILED','REJECTED','EXPIRED','REDEEMED','RETURNED')")
+    int deleteExpiredIdempotencyKeys(@Param("threshold") java.time.LocalDateTime threshold);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT t FROM StablecoinTransaction t WHERE t.id = :id")
     Optional<StablecoinTransaction> findByIdWithLock(@Param("id") UUID id);

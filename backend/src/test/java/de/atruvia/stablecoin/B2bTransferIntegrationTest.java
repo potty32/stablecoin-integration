@@ -78,7 +78,7 @@ class B2bTransferIntegrationTest extends AbstractLocalDbTest {
         TransactionResponse result = transferService.initiate(
                 UUID.randomUUID().toString(),
                 new InitiateTransferRequest(B2B_IBAN, LOW_RISK_WALLET,
-                        new BigDecimal("1000"), StablecoinCurrency.USDC, null, null, "Test"),
+                        new BigDecimal("1000"), StablecoinCurrency.USDC, null, null, "Test", null, null, null),
                 "cust-b2b-001");
 
         assertThat(result.status()).isEqualTo(TransactionStatus.SETTLED);
@@ -98,7 +98,7 @@ class B2bTransferIntegrationTest extends AbstractLocalDbTest {
         assertThatThrownBy(() -> transferService.initiate(
                 UUID.randomUUID().toString(),
                 new InitiateTransferRequest(B2B_IBAN, "0xNOT_WHITELISTED_WALLET_ADDRESS_0001",
-                        new BigDecimal("500"), StablecoinCurrency.USDC, null, null, "Test"),
+                        new BigDecimal("500"), StablecoinCurrency.USDC, null, null, "Test", null, null, null),
                 "cust-b2b-001"))
                 .isInstanceOf(ComplianceBlockException.class)
                 .hasMessageContaining("NOT_WHITELISTED");
@@ -115,7 +115,7 @@ class B2bTransferIntegrationTest extends AbstractLocalDbTest {
         TransactionResponse pending = transferService.initiate(
                 UUID.randomUUID().toString(),
                 new InitiateTransferRequest(B2B_IBAN, LOW_RISK_WALLET,
-                        new BigDecimal("50000"), StablecoinCurrency.USDC, null, null, "Bulk"),
+                        new BigDecimal("50000"), StablecoinCurrency.USDC, null, null, "Bulk", null, null, null),
                 "cust-b2b-001");
 
         assertThat(pending.status()).isEqualTo(TransactionStatus.PENDING_APPROVAL);
@@ -154,7 +154,7 @@ class B2bTransferIntegrationTest extends AbstractLocalDbTest {
         assertThatThrownBy(() -> transferService.initiate(
                 UUID.randomUUID().toString(),
                 new InitiateTransferRequest(B2B_IBAN, DEAD_WALLET,
-                        new BigDecimal("100"), StablecoinCurrency.USDC, null, null, "Test"),
+                        new BigDecimal("100"), StablecoinCurrency.USDC, null, null, "Test", null, null, null),
                 "cust-b2b-001"))
                 .isInstanceOf(ComplianceBlockException.class);
 

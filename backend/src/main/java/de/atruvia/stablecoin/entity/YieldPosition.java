@@ -41,6 +41,16 @@ public class YieldPosition {
     @Column(name = "tenant_id", nullable = false, length = 50)
     private String tenantId;
 
+    // ── G-15: Jahresabschluss-Bewertung (V18) ─────────────────────────────────
+    @Column(name = "year_end_valuation_eur", precision = 18, scale = 6)
+    private BigDecimal yearEndValuationEur;
+
+    @Column(name = "year_end_tax_event_id")
+    private UUID yearEndTaxEventId;
+
+    @Column(name = "last_valued_year")
+    private Integer lastValuedYear;
+
     @PrePersist
     void prePersist() {
         if (status == null) status = YieldStatus.ACTIVE;
@@ -65,4 +75,10 @@ public class YieldPosition {
     public void setDepositTransactionId(UUID depositTransactionId) { this.depositTransactionId = depositTransactionId; }
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+    public BigDecimal getYearEndValuationEur() { return yearEndValuationEur; }
+    public void setYearEndValuationEur(BigDecimal v) { this.yearEndValuationEur = v; }
+    public UUID getYearEndTaxEventId() { return yearEndTaxEventId; }
+    public void setYearEndTaxEventId(UUID v) { this.yearEndTaxEventId = v; }
+    public Integer getLastValuedYear() { return lastValuedYear; }
+    public void setLastValuedYear(Integer v) { this.lastValuedYear = v; }
 }

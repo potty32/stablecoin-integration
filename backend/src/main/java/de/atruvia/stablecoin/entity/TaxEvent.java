@@ -24,7 +24,7 @@ public class TaxEvent {
     @Column(name = "yield_position_id", nullable = false)
     private UUID yieldPositionId;
 
-    @Column(name = "redeem_tx_id", nullable = false)
+    @Column(name = "redeem_tx_id")  // nullable: bei Jahresabschluss-Bewertung kein Redeem
     private UUID redeemTxId;
 
     @Column(name = "customer_account_id", nullable = false)

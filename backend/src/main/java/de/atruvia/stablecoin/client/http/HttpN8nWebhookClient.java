@@ -39,6 +39,20 @@ public class HttpN8nWebhookClient implements N8nWebhookClient {
     }
 
     @Override
+    public void notifyOutboxAlert(int stuckCount, int thresholdMinutes, String oldestMessageId) {
+        var payload = java.util.Map.of(
+                "event", "OUTBOX_ALERT",
+                "stuckCount", stuckCount,
+                "thresholdMinutes", thresholdMinutes,
+                "oldestMessageId", oldestMessageId
+        );
+        restClient.post().uri(webhookUrl).contentType(MediaType.APPLICATION_JSON).body(payload)
+                .retrieve().onStatus(HttpStatusCode::isError, (req, response) -> {
+                    throw new RuntimeException("n8n outbox-alert error: " + response.getStatusCode());
+                }).toBodilessEntity();
+    }
+
+    @Override
     public void notifyAddressRevoked(String walletAddress, String customerId, String riskScore) {
         var payload = java.util.Map.of(
                 "event", "ADDRESS_SANCTIONS_REVOKED",

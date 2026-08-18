@@ -41,3 +41,8 @@ app:
     validity-seconds: 60
   compliance:
     high-risk-address: "0xHighRiskAddress000000000000000000000000"
+  outbox:
+    alert-threshold-minutes: 15
+    monitor-interval-ms: 300000
+  security:
+    phone-hmac-key: ${PHONE_HMAC_KEY:atruvia-stablecoin-2026}

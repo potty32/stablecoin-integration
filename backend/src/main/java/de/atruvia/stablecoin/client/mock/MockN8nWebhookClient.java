@@ -24,4 +24,10 @@ public class MockN8nWebhookClient implements N8nWebhookClient {
         log.warn("[MOCK n8n] Address revoked by sanctions batch: wallet={} customer={} riskScore={}",
                 walletAddress, customerId, riskScore);
     }
+
+    @Override
+    public void notifyOutboxAlert(int stuckCount, int thresholdMinutes, String oldestMessageId) {
+        log.error("[MOCK n8n] OUTBOX-ALERT: {} Nachricht(en) stecken seit >{} Minuten. Älteste: {}",
+                stuckCount, thresholdMinutes, oldestMessageId);
+    }
 }

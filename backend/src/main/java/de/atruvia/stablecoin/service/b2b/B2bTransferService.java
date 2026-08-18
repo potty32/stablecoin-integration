@@ -23,6 +23,7 @@ import de.atruvia.stablecoin.service.fx.FxRateService;
 import de.atruvia.stablecoin.exception.SlippageExceededException;
 import de.atruvia.stablecoin.service.revenue.RevenueService;
 import de.atruvia.stablecoin.service.b2b.TenantSettingsService;
+import de.atruvia.stablecoin.service.b2b.LimitResolver;
 import de.atruvia.stablecoin.entity.TenantSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,6 +106,7 @@ public class B2bTransferService {
     private final AddressBookRepository addressBookRepository;
     private final InstitutionalAddressBookRepository institutionalAddressBookRepository;
     private final TenantSettingsService tenantSettingsService;
+    private final LimitResolver limitResolver;
 
     public B2bTransferService(
             StablecoinTransactionRepository txRepository,
@@ -122,7 +124,8 @@ public class B2bTransferService {
             AddressBookRepository addressBookRepository,
             InstitutionalAddressBookRepository institutionalAddressBookRepository,
             FxRateService fxRateService,
-            TenantSettingsService tenantSettingsService) {
+            TenantSettingsService tenantSettingsService,
+            LimitResolver limitResolver) {
         this.txRepository = txRepository;
         this.accountRepository = accountRepository;
         this.approvalRepository = approvalRepository;
@@ -139,6 +142,7 @@ public class B2bTransferService {
         this.institutionalAddressBookRepository = institutionalAddressBookRepository;
         this.fxRateService = fxRateService;
         this.tenantSettingsService = tenantSettingsService;
+        this.limitResolver = limitResolver;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -395,8 +399,26 @@ public class B2bTransferService {
         tx.setGrossDebit(grossDebit);
         tx.setFeeAmount(tenantFee);
         tx.setSlippageToleranceBps(settings.getSlippageToleranceBps());
+        // G-09: Idempotenz-Key läuft nach 30 Tagen ab (PSD2-konform)
+        tx.setIdempotencyExpiresAt(LocalDateTime.now().plusDays(30));
         tx.setDestinationWallet(request.destinationWallet());
         tx.setSourceWallet(account.getWalletAddress());
+
+        // G-12: Travel Rule (FATF Rec. 16) — Pflichtfelder für Großbeträge
+        if (settings.isTravelRuleEnabled()
+                && request.amountEur().compareTo(settings.getTravelRuleThresholdEur()) > 0) {
+            if (request.beneficiaryName() == null || request.beneficiaryName().isBlank()
+                    || request.beneficiaryAddress() == null || request.beneficiaryAddress().isBlank()) {
+                throw new IllegalArgumentException(
+                        "FATF_001: Begünstigtendaten (beneficiaryName, beneficiaryAddress) " +
+                        "sind Pflicht für Transfers > " + settings.getTravelRuleThresholdEur() + " EUR");
+            }
+            tx.setBeneficiaryName(request.beneficiaryName());
+            tx.setBeneficiaryAddress(request.beneficiaryAddress());
+            tx.setBeneficiaryAccountId(request.beneficiaryAccountId());
+            tx.setTravelRuleRequired(true);
+            tx.setTravelRuleCompletedAt(java.time.LocalDateTime.now());
+        }
         // Status wird via @PrePersist auf CREATED gesetzt
         StablecoinTransaction savedTx = txRepository.save(tx);
 
@@ -405,8 +427,9 @@ public class B2bTransferService {
         saveTransitionLog(savedTx.getId(), null, CREATED, initiatorId,
                 "Transfer initiiert: " + request.amountEur() + " EUR " + request.currency());
 
-        // G-03: Vier-Augen-Schwelle aus TenantSettings (statt statischem account.txLimitSingle)
-        boolean requiresApproval = request.amountEur().compareTo(settings.getApprovalThresholdB2b()) > 0;
+        // G-08: Vier-Augen-Schwelle via LimitResolver (Hierarchie: TenantSettings, kein Kundenoverride)
+        BigDecimal approvalThreshold = limitResolver.resolveApprovalThreshold(settings);
+        boolean requiresApproval = request.amountEur().compareTo(approvalThreshold) > 0;
         if (requiresApproval) {
             ApprovalWorkflow workflow = new ApprovalWorkflow();
             workflow.setTransaction(savedTx);

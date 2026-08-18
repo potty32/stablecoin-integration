@@ -76,6 +76,20 @@ public class TenantSettings {
     @Column(name = "enable_bulk_payments", nullable = false)
     private boolean enableBulkPayments = true;
 
+    // ── G-13: Bulk-Payment Mindest-Erfolgsquote ───────────────────────────────
+    @Column(name = "bulk_min_success_rate", nullable = false, precision = 5, scale = 2)
+    private java.math.BigDecimal bulkMinSuccessRate = java.math.BigDecimal.ZERO;
+
+    @Column(name = "bulk_dry_run_enabled", nullable = false)
+    private boolean bulkDryRunEnabled = false;
+
+    // ── G-12: Travel Rule ─────────────────────────────────────────────────────
+    @Column(name = "travel_rule_enabled", nullable = false)
+    private boolean travelRuleEnabled = false;
+
+    @Column(name = "travel_rule_threshold_eur", nullable = false, precision = 18, scale = 6)
+    private java.math.BigDecimal travelRuleThresholdEur = new java.math.BigDecimal("15000.000000");
+
     // ── Kill Switch (Mandanten-Ebene, G-07) ───────────────────────────────────
     @Column(name = "kill_switch_active", nullable = false)
     private boolean killSwitchActive = false;
@@ -122,6 +136,13 @@ public class TenantSettings {
     public String getBlockedCountries() { return blockedCountries; }
     public boolean isEnableYield() { return enableYield; }
     public boolean isEnableBulkPayments() { return enableBulkPayments; }
+    public java.math.BigDecimal getBulkMinSuccessRate() { return bulkMinSuccessRate; }
+    public void setBulkMinSuccessRate(java.math.BigDecimal v) { this.bulkMinSuccessRate = v; }
+    public boolean isBulkDryRunEnabled() { return bulkDryRunEnabled; }
+    public boolean isTravelRuleEnabled() { return travelRuleEnabled; }
+    public void setTravelRuleEnabled(boolean v) { this.travelRuleEnabled = v; }
+    public java.math.BigDecimal getTravelRuleThresholdEur() { return travelRuleThresholdEur; }
+    public void setTravelRuleThresholdEur(java.math.BigDecimal v) { this.travelRuleThresholdEur = v; }
     public boolean isKillSwitchActive() { return killSwitchActive; }
     public void setKillSwitchActive(boolean v) { this.killSwitchActive = v; }
     public String getKillSwitchReason() { return killSwitchReason; }

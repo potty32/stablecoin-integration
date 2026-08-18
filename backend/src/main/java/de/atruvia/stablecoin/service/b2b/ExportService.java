@@ -48,6 +48,7 @@ public class ExportService {
 
     private static final String CAMT053_NS = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08";
     private static final String CAMT054_NS = "urn:iso:std:iso:20022:tech:xsd:camt.054.001.08";
+    private static final String CAMT029_NS = "urn:iso:std:iso:20022:tech:xsd:camt.029.001.09";
     private static final DateTimeFormatter ISO_DT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
     private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -209,6 +210,100 @@ public class ExportService {
 
     private Element el54(Document doc, Element parent, String tag) {
         Element el = doc.createElementNS(CAMT054_NS, tag);
+        parent.appendChild(el);
+        return el;
+    }
+
+    // ── CAMT.029 Bank-to-Customer Unable To Apply Notification (G-10) ─────────
+
+    /**
+     * Generiert ein CAMT.029.001.09-Dokument für automatische Retouren (INBOUND_RETURN).
+     * Ermöglicht ERP-Systemen (SAP), fehlgeschlagene Zahlungseingänge zu verbuchen.
+     * Standardkonvention: ein CAMT.029 pro Tag (letzte 24h).
+     */
+    public String generateCamt029(String iban, java.time.LocalDateTime since) {
+        CustomerAccount account = accountRepository.findByIban(iban)
+                .orElseThrow(() -> new NoSuchElementException("Account not found: " + iban));
+
+        List<StablecoinTransaction> returnTxs = txRepository
+                .findByCustomerAccountIdAndStatus(account.getId(), TransactionStatus.SETTLED, Pageable.unpaged())
+                .getContent()
+                .stream()
+                .filter(tx -> tx.getType() == de.atruvia.stablecoin.entity.TransactionType.INBOUND_RETURN)
+                .filter(tx -> since == null || (tx.getSettledAt() != null && tx.getSettledAt().isAfter(since)))
+                .toList();
+
+        log.info("[Export] CAMT.029 iban={} returnTxs={}", iban, returnTxs.size());
+        try {
+            return buildCamt029Xml(iban, returnTxs);
+        } catch (Exception e) {
+            throw new RuntimeException("CAMT.029-Erzeugung fehlgeschlagen: " + e.getMessage(), e);
+        }
+    }
+
+    private String buildCamt029Xml(String iban, List<StablecoinTransaction> returnTxs) throws Exception {
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setNamespaceAware(true);
+        Document doc = dbf.newDocumentBuilder().newDocument();
+        String now = LocalDateTime.now().format(ISO_DT);
+
+        Element root = doc.createElementNS(CAMT029_NS, "Document");
+        doc.appendChild(root);
+        Element msg = el29(doc, root, "RsltnOfInvstgtn");
+
+        // GrpHdr
+        Element hdr = el29(doc, msg, "Assgnmt");
+        addText(doc, hdr, "Id", "CAMT029-" + iban + "-" + System.currentTimeMillis());
+        Element assgnr = el29(doc, hdr, "Assgnr");
+        Element assgnrPty = el29(doc, assgnr, "Pty");
+        addText(doc, assgnrPty, "Nm", "Atruvia Stablecoin Platform");
+        Element assgne = el29(doc, hdr, "Assgne");
+        Element assgnePty = el29(doc, assgne, "Pty");
+        addText(doc, assgnePty, "Nm", iban);
+        addText(doc, hdr, "CreDtTm", now);
+
+        // Status (CNCL = Cancelled)
+        Element sts = el29(doc, msg, "Sts");
+        addText(doc, sts, "Conf", "CNCL");
+
+        // Pro INBOUND_RETURN eine CxlDtls-Sektion
+        for (StablecoinTransaction tx : returnTxs) {
+            Element cxl = el29(doc, msg, "CxlDtls");
+            Element txInf = el29(doc, cxl, "TxInfAndSts");
+            addText(doc, txInf, "CxlStsId", tx.getId().toString());
+
+            // CxlStsRsn: AC04=AccountClosed oder AG01=TransactionForbidden (vereinfacht)
+            Element rsn = el29(doc, txInf, "CxlStsRsn");
+            Element rsnInfo = el29(doc, rsn, "Rsn");
+            addText(doc, rsnInfo, "Cd", "AC04");  // Account Closed / Not Active
+
+            Element orgnlTxRef = el29(doc, txInf, "OrgnlTxRef");
+            if (tx.getAmountFiat() != null) {
+                Element amt = doc.createElementNS(CAMT029_NS, "Amt");
+                amt.setAttribute("Ccy", "EUR");
+                amt.setTextContent(tx.getAmountFiat().setScale(2, java.math.RoundingMode.HALF_UP).toPlainString());
+                orgnlTxRef.appendChild(amt);
+            }
+            addText(doc, orgnlTxRef, "ReqdExctnDt",
+                    tx.getCreatedAt() != null ? tx.getCreatedAt().toLocalDate().format(ISO_DATE) : "");
+
+            if (tx.getParentTransactionId() != null) {
+                addText(doc, txInf, "RjctdModVal", tx.getParentTransactionId().toString());
+            }
+        }
+
+        TransformerFactory tf = TransformerFactory.newInstance();
+        Transformer transformer = tf.newTransformer();
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+        transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
+        transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
+        java.io.StringWriter sw = new java.io.StringWriter();
+        transformer.transform(new DOMSource(doc), new StreamResult(sw));
+        return sw.toString();
+    }
+
+    private Element el29(Document doc, Element parent, String tag) {
+        Element el = doc.createElementNS(CAMT029_NS, tag);
         parent.appendChild(el);
         return el;
     }

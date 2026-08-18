@@ -15,5 +15,9 @@ public record InitiateTransferRequest(
         @NotNull StablecoinCurrency currency,
         UUID rateQuoteId,
         String purposeCode,
-        String reference
+        String reference,
+        // G-12: Travel Rule (FATF Rec. 16) — Pflichtfelder bei amountEur > TravelRuleThreshold
+        String beneficiaryName,
+        String beneficiaryAddress,
+        String beneficiaryAccountId
 ) {}

@@ -153,6 +153,26 @@ public class StablecoinTransaction {
     public UUID getParentTransactionId() { return parentTransactionId; }
     public void setParentTransactionId(UUID parentTransactionId) { this.parentTransactionId = parentTransactionId; }
 
+    // ── G-12: Travel Rule (V17) ───────────────────────────────────────────────
+
+    @Column(name = "beneficiary_name", length = 200)
+    private String beneficiaryName;
+
+    @Column(name = "beneficiary_address")
+    private String beneficiaryAddress;
+
+    @Column(name = "beneficiary_account_id", length = 50)
+    private String beneficiaryAccountId;
+
+    @Column(name = "originator_name", length = 200)
+    private String originatorName;
+
+    @Column(name = "travel_rule_required", nullable = false)
+    private boolean travelRuleRequired = false;
+
+    @Column(name = "travel_rule_completed_at")
+    private java.time.LocalDateTime travelRuleCompletedAt;
+
     // ── G-01: Buchungskreislauf (V11) ─────────────────────────────────────────
 
     @Column(name = "gross_debit", precision = 18, scale = 6)
@@ -172,6 +192,18 @@ public class StablecoinTransaction {
     @Column(name = "tax_withheld", precision = 18, scale = 6)
     private BigDecimal taxWithheld;
 
+    public String getBeneficiaryName() { return beneficiaryName; }
+    public void setBeneficiaryName(String v) { this.beneficiaryName = v; }
+    public String getBeneficiaryAddress() { return beneficiaryAddress; }
+    public void setBeneficiaryAddress(String v) { this.beneficiaryAddress = v; }
+    public String getBeneficiaryAccountId() { return beneficiaryAccountId; }
+    public void setBeneficiaryAccountId(String v) { this.beneficiaryAccountId = v; }
+    public String getOriginatorName() { return originatorName; }
+    public void setOriginatorName(String v) { this.originatorName = v; }
+    public boolean isTravelRuleRequired() { return travelRuleRequired; }
+    public void setTravelRuleRequired(boolean v) { this.travelRuleRequired = v; }
+    public java.time.LocalDateTime getTravelRuleCompletedAt() { return travelRuleCompletedAt; }
+    public void setTravelRuleCompletedAt(java.time.LocalDateTime v) { this.travelRuleCompletedAt = v; }
     public BigDecimal getGrossDebit() { return grossDebit; }
     public void setGrossDebit(BigDecimal grossDebit) { this.grossDebit = grossDebit; }
     public BigDecimal getFeeAmount() { return feeAmount; }
@@ -182,4 +214,11 @@ public class StablecoinTransaction {
     public void setSlippageToleranceBps(Integer slippageToleranceBps) { this.slippageToleranceBps = slippageToleranceBps; }
     public BigDecimal getTaxWithheld() { return taxWithheld; }
     public void setTaxWithheld(BigDecimal taxWithheld) { this.taxWithheld = taxWithheld; }
+
+    // ── G-09: Idempotenz-Key TTL (V16) ────────────────────────────────────────
+    @Column(name = "idempotency_expires_at")
+    private java.time.LocalDateTime idempotencyExpiresAt;
+
+    public java.time.LocalDateTime getIdempotencyExpiresAt() { return idempotencyExpiresAt; }
+    public void setIdempotencyExpiresAt(java.time.LocalDateTime v) { this.idempotencyExpiresAt = v; }
 }
