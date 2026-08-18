@@ -5,6 +5,7 @@ import de.atruvia.stablecoin.entity.CustomerType;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
 import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.entity.TransactionType;
+import de.atruvia.stablecoin.storage.ExportStorageService;
 import de.atruvia.stablecoin.repository.CustomerAccountRepository;
 import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
 import org.slf4j.Logger;
@@ -49,6 +50,10 @@ public class ExportService {
     private static final String CAMT053_NS = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08";
     private static final String CAMT054_NS = "urn:iso:std:iso:20022:tech:xsd:camt.054.001.08";
     private static final String CAMT029_NS = "urn:iso:std:iso:20022:tech:xsd:camt.029.001.09";
+    private static final java.time.Duration PRESIGNED_URL_TTL = java.time.Duration.ofMinutes(15);
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ExportStorageService exportStorageService;
     private static final DateTimeFormatter ISO_DT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
     private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -101,6 +106,41 @@ public class ExportService {
         } catch (Exception e) {
             throw new IllegalStateException("CAMT.053 generation failed: " + e.getMessage(), e);
         }
+    }
+
+    // ── S3-basierter Async-Export (Zielbild) ──────────────────────────────────────
+
+    /**
+     * Triggert einen asynchronen Export und legt das Ergebnis in S3 (dev: /tmp) ab.
+     * Gibt eine Presigned-URL mit 15 Minuten Gültigkeitsdauer zurück.
+     *
+     * @param exportType "camt053", "camt054", "datev", "camt029"
+     * @param iban       Optionale IBAN; falls null: erste B2B-IBAN
+     * @param tenantId   Mandant (für S3-Key-Partitionierung)
+     */
+    public String triggerAsyncExport(String exportType, String iban, String tenantId) {
+        if (exportStorageService == null) {
+            throw new IllegalStateException("ExportStorageService nicht konfiguriert. " +
+                    "Dev-Profil aktiv? DevExportStorageService muss injiziert sein.");
+        }
+        String resolvedIban = resolveIban(iban);
+        byte[] content;
+        String extension;
+        try {
+            content = switch (exportType.toLowerCase()) {
+                case "camt053" -> generateCamt053(resolvedIban).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                case "camt054" -> generateCamt054(resolvedIban).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                case "camt029" -> generateCamt029(resolvedIban, java.time.LocalDateTime.now().minusHours(24))
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                case "datev"   -> generateDatev(resolvedIban).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                default -> throw new IllegalArgumentException("Unbekannter Export-Typ: " + exportType);
+            };
+            extension = exportType.startsWith("camt") ? "xml" : "csv";
+        } catch (Exception e) {
+            throw new RuntimeException("Export-Generierung fehlgeschlagen: " + e.getMessage(), e);
+        }
+        String s3Key = exportStorageService.upload(tenantId, resolvedIban, exportType, content, extension);
+        return exportStorageService.generatePresignedUrl(s3Key, PRESIGNED_URL_TTL);
     }
 
     // ── CAMT.054 Bank-to-Customer Notification (UC-29: Echtzeit-Avisierung) ─────

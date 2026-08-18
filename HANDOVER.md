@@ -1,6 +1,6 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-18** (Sprint-Abschluss + Dev-Portal) | GitHub: https://github.com/potty32/stablecoin-integration
+> Letzte Aktualisierung: **2026-08-18** (Async Kafka + S3 Architektur) | GitHub: https://github.com/potty32/stablecoin-integration
 > **Commits 2026-08-18 (9 Commits):**
 > `68bb995` RLS → `a607b2e` Inbound → `1f06eba` Konsolidierung →
 > `1cd16f5` Security (Webhook-Signatur, OutboxProcessor RLS-Fix) →
@@ -485,7 +485,21 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 
 **125 Tests — 0 Failures | Flyway V1–V18 | QA_REVIEW_CHANGES.md vollständig**
 
-**E2E-Test: Mandantenübergreifende Interbanken-Clearance** (neuester Commit):
+**Async Event-Driven Architecture: Kafka + S3** (neuester Commit):
+- ✅ `kafka/event/` — 4 JSON-Event-POJOs (TransferStatus, ComplianceScreening, YieldLifecycle, Analytics)
+- ✅ `kafka/KafkaEventProducer` Interface + `KafkaTopics` Konstanten
+- ✅ `kafka/dev/DevKafkaProducer` — Spring ApplicationEventPublisher (kein Kafka-Broker!)
+- ✅ `kafka/dev/DevKafkaConsumer` — @EventListener @Async Consumer-Simulation
+- ✅ `kafka/dev/InMemoryEventStore` — GET /api/v1/dev/events für Event-Inspektion
+- ✅ `storage/ExportStorageService` Interface + `DevExportStorageService` → /tmp/stablecoin-exports/
+- ✅ `storage/dev/DevExportDownloadController` — Presigned-URL-Simulation
+- ✅ `analytics/AnalyticsDataProductController` — Data-Mesh GET /api/v1/analytics/**
+- ✅ B2bTransferService: Kafka Events bei jedem transitionTo() + settleTransaction()
+- ✅ ExportService: `triggerAsyncExport()` → S3-Upload → Presigned URL (15min)
+- ✅ `INTEGRATION_TARGET_ARCHITECTURE.md` vollständiges Architektur-Konzept
+- ✅ 130 Tests | 0 Failures
+
+**E2E-Test: Mandantenübergreifende Interbanken-Clearance** (vorheriger Commit):
 - ✅ `CrossTenantInterbankenClearanceTest.java` — 5 TCs, vollständiger E2E-Kreislauf
 - ✅ TC-01: JWT-Token-Generierung (beide Mandanten via `/api/v1/auth/dev-token`)
 - ✅ TC-02: Outbound-Transfer Mandant A → SETTLED + grossRevenue-Prüfung

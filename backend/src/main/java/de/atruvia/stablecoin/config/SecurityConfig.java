@@ -45,7 +45,9 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/api/v1/auth/dev-token",
-                                "/api/v1/b2b/inbound/webhook"
+                                "/api/v1/b2b/inbound/webhook",
+                                // Dev: Kafka-Event-Inspektion und S3-Export-Download
+                                "/api/v1/dev/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

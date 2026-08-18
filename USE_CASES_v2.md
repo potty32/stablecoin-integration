@@ -1,6 +1,6 @@
 # Use Cases — Atruvia Stablecoin Integration Platform · Version 3
 
-> **Stand: 2026-08-18 (Sprint-Abschluss)** | Commits: `68bb995` → `887b6f6` (9 Commits)  
+> **Stand: 2026-08-18 (Async Kafka + S3 Architektur)** | Commits: `68bb995` → aktuell  
 > Vollständige Dokumentation aller **34+ Use Cases** (UC-01–UC-31 + G-01–G-15 Gap-Fixes + Dev-Portal).  
 > Alle Änderungen aus Session 1–8 sind eingearbeitet.
 
@@ -27,6 +27,30 @@ Das Dev-Portal ermöglicht **interaktives Durchspielen aller Use Cases** ohne Do
 | **Webhook-Simulator** | UC-27: Inbound-Webhook direkt aus UI triggern (LOW/HIGH/UNBEKANNT) |
 | **Export-Downloads** | CAMT.053, CAMT.054, CAMT.029, DATEV-CSV per Button |
 | **Sanctions-Trigger** | Nachtbatch manuell auslösen (UC-22) |
+
+### Async Kafka + S3 Architektur (Event-Driven)
+
+```bash
+# Dev-Mode: Kafka-Events ohne Broker inspizieren
+GET http://localhost:8080/api/v1/dev/events                    # alle Events
+GET http://localhost:8080/api/v1/dev/events?topic=stablecoin-transfers
+DELETE http://localhost:8080/api/v1/dev/events                 # leeren
+
+# S3-Export asynchron triggern (dev: schreibt nach /tmp/stablecoin-exports/)
+POST http://localhost:8080/api/v1/b2b/export/async-trigger?type=camt053
+→ { presignedUrl: "http://localhost:8080/api/v1/dev/exports/download?token=...", validForSeconds: 900 }
+
+# Verfügbare Dev-Exporte auflisten
+GET http://localhost:8080/api/v1/dev/exports/list
+
+# Data-Mesh Analytics (RLS-isoliert nach Mandant)
+GET http://localhost:8080/api/v1/analytics/summary
+GET http://localhost:8080/api/v1/analytics/revenue
+```
+
+**Architekturdokument:** `INTEGRATION_TARGET_ARCHITECTURE.md`
+
+---
 
 ### E2E-Testausführung (Interbanken-Clearance)
 

@@ -21,6 +21,9 @@ import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.service.compliance.ComplianceService;
 import de.atruvia.stablecoin.service.fx.FxRateService;
 import de.atruvia.stablecoin.exception.SlippageExceededException;
+import de.atruvia.stablecoin.kafka.KafkaEventProducer;
+import de.atruvia.stablecoin.kafka.event.AnalyticsEvent;
+import de.atruvia.stablecoin.kafka.event.TransferStatusEvent;
 import de.atruvia.stablecoin.service.revenue.RevenueService;
 import de.atruvia.stablecoin.service.b2b.TenantSettingsService;
 import de.atruvia.stablecoin.service.b2b.LimitResolver;
@@ -107,6 +110,11 @@ public class B2bTransferService {
     private final InstitutionalAddressBookRepository institutionalAddressBookRepository;
     private final TenantSettingsService tenantSettingsService;
     private final LimitResolver limitResolver;
+
+    /** Kafka-Event-Publishing — dev: In-Memory, prod: spring-kafka */
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private KafkaEventProducer kafkaEventProducer;
 
     public B2bTransferService(
             StablecoinTransactionRepository txRepository,
@@ -247,6 +255,9 @@ public class B2bTransferService {
         txRepository.save(tx);
         saveTransitionLog(txId, current, targetStatus, userId, "Statuswechsel: " + current + " → " + targetStatus);
         log.info("[STATE-MACHINE] tx={} {} → {}", txId, current, targetStatus);
+
+        // Kafka Event: stablecoin-transfers (async, best-effort)
+        publishTransferStatusEvent(tx, current.name(), targetStatus.name(), userId);
     }
 
     /** Übergang nach FUNDS_HELD — speichert zusätzlich die holdId für späteren Auto-Release. */
@@ -725,6 +736,51 @@ public class B2bTransferService {
                         e.getTimestamp(),
                         e.getDetails()))
                 .toList();
+    }
+
+    // ── Kafka Event Publishing ────────────────────────────────────────────────────
+
+    /**
+     * Publiziert ein TransferStatusEvent auf das Kafka-Topic "stablecoin-transfers".
+     * Best-effort (kein Re-throw bei Fehler): Kafka-Ausfall darf Zahlung nicht blockieren.
+     */
+    private void publishTransferStatusEvent(StablecoinTransaction tx,
+                                             String previousStatus, String currentStatus,
+                                             String userId) {
+        if (kafkaEventProducer == null) return;
+        try {
+            String tenantId = TenantContext.get();
+            String iban = tx.getCustomerAccount() != null
+                    ? tx.getCustomerAccount().getIban() : null;
+            TransferStatusEvent event = TransferStatusEvent.of(
+                    tenantId, userId,
+                    tx.getId().toString(),
+                    tx.getType() != null ? tx.getType().name() : null,
+                    previousStatus, currentStatus,
+                    tx.getAmountFiat(), tx.getAmountStablecoin(),
+                    tx.getCurrency() != null ? tx.getCurrency().name() : null,
+                    tx.getBlockchainHash(),
+                    tx.getGrossRevenue(), iban);
+            kafkaEventProducer.publishTransferStatus(event);
+
+            // Wenn SETTLED: zusätzlich Analytics-Event für Data-Mesh-Lakehouse
+            if ("SETTLED".equals(currentStatus)) {
+                var ana = AnalyticsEvent.ofSettledTransfer(
+                        tenantId,
+                        tx.getId().toString(),
+                        tx.getType() != null ? tx.getType().name() : null,
+                        tx.getCurrency() != null ? tx.getCurrency().name() : null,
+                        tx.getAmountFiat(), tx.getAmountStablecoin(),
+                        tx.getFxRate(), tx.getFxSpread(),
+                        tx.getGrossRevenue(), tx.getTransactionFee(), tx.getGasCost(),
+                        tx.getSettledAt() != null ? tx.getSettledAt().toInstant(java.time.ZoneOffset.UTC) : null,
+                        tx.getCustomerAccount() != null ? tx.getCustomerAccount().getCustomerType().name() : null,
+                        tx.getCustomerAccount() != null ? tx.getCustomerAccount().getKycTier().name() : null);
+                kafkaEventProducer.publishAnalytics(ana);
+            }
+        } catch (Exception e) {
+            log.warn("[KAFKA] Event-Publishing fehlgeschlagen (best-effort): {}", e.getMessage());
+        }
     }
 
     public TransferPageResponse listTransfers(String userId, TransactionStatus statusFilter, int page, int size) {

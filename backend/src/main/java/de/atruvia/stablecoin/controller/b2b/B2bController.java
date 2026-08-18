@@ -205,6 +205,27 @@ public class B2bController {
                 .body(xml.getBytes(StandardCharsets.UTF_8));
     }
 
+    // ── Async S3-Export (Zielbild) ────────────────────────────────────────────────
+
+    /**
+     * Triggert asynchronen Export → S3-Ablage → Presigned-URL zurück.
+     * Typ: camt053 | camt054 | camt029 | datev
+     * URL gültig: 15 Minuten (konfigurierbar in ExportService)
+     */
+    @PostMapping("/export/async-trigger")
+    public ResponseEntity<java.util.Map<String, Object>> triggerAsyncExport(
+            @RequestParam String type,
+            @RequestParam(required = false) String iban,
+            Authentication auth) {
+        String tenantId = de.atruvia.stablecoin.config.TenantContext.get();
+        String presignedUrl = exportService.triggerAsyncExport(type, iban, tenantId != null ? tenantId : "default");
+        return ResponseEntity.accepted().body(java.util.Map.of(
+                "presignedUrl", presignedUrl,
+                "validForSeconds", 900,
+                "exportType", type,
+                "message", "Export generiert und in S3 abgelegt. URL gültig 15 Minuten."));
+    }
+
     /**
      * G-10: CAMT.029 Rejection-Benachrichtigung für automatische Retouren (INBOUND_RETURN).
      * ISO 20022 Unable-To-Apply Notification — ERP-Systeme verbuchen fehlgeschlagene Eingänge.
