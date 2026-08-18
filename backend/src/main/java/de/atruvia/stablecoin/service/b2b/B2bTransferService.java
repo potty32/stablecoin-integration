@@ -51,13 +51,19 @@ public class B2bTransferService {
     // → getOrDefault liefert leere Menge → alle weiteren Übergänge blockiert
     private static final Map<TransactionStatus, EnumSet<TransactionStatus>> ALLOWED =
         Map.ofEntries(
-            entry(CREATED,            EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, FAILED)),
-            entry(PENDING_APPROVAL,   EnumSet.of(APPROVED, REJECTED, EXPIRED, FAILED)),
-            entry(APPROVED,           EnumSet.of(COMPLIANCE_CHECKED, FAILED)),
-            entry(COMPLIANCE_CHECKED, EnumSet.of(FUNDS_HELD, FAILED)),
-            entry(FUNDS_HELD,         EnumSet.of(SUBMITTED, FAILED)),
-            entry(SUBMITTED,          EnumSet.of(SETTLED, FAILED)),
-            entry(SETTLED,            EnumSet.of(REDEEMED, FAILED))
+            // ── Outbound-Pfad ──────────────────────────────────────────────────
+            entry(CREATED,              EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, INCOMING, FAILED)),
+            entry(PENDING_APPROVAL,     EnumSet.of(APPROVED, REJECTED, EXPIRED, FAILED)),
+            entry(APPROVED,             EnumSet.of(COMPLIANCE_CHECKED, FAILED)),
+            entry(COMPLIANCE_CHECKED,   EnumSet.of(FUNDS_HELD, FAILED)),
+            entry(FUNDS_HELD,           EnumSet.of(SUBMITTED, FAILED)),
+            entry(SUBMITTED,            EnumSet.of(SETTLED, FAILED)),
+            entry(SETTLED,              EnumSet.of(REDEEMED, FAILED)),
+            // ── Inbound-Pfad ───────────────────────────────────────────────────
+            entry(INCOMING,             EnumSet.of(COMPLIANCE_PENDING, FAILED)),
+            entry(COMPLIANCE_PENDING,   EnumSet.of(COMPLIANCE_APPROVED, COMPLIANCE_REJECTED, FAILED)),
+            entry(COMPLIANCE_APPROVED,  EnumSet.of(SETTLED, FAILED)),
+            entry(COMPLIANCE_REJECTED,  EnumSet.of(FAILED))
         );
 
     private final FxRateService fxRateService;
@@ -483,7 +489,7 @@ public class B2bTransferService {
         UUID txId = tx.getId();
         try {
             self.transitionTo(txId, COMPLIANCE_CHECKED, userId);
-            complianceService.screenAndAssert(tx.getDestinationWallet(), txId, userId);
+            complianceService.screenAndAssert(tx.getDestinationWallet(), txId, userId, "outgoing");
 
             HoldResponseDto hold = coreBankingClient.createHold(
                     tx.getCustomerAccount().getIban(),

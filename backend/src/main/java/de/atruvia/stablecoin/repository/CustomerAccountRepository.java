@@ -11,4 +11,5 @@ import java.util.UUID;
 public interface CustomerAccountRepository extends JpaRepository<CustomerAccount, UUID> {
     Optional<CustomerAccount> findByIban(String iban);
     Optional<CustomerAccount> findByCustomerId(String customerId);
+    Optional<CustomerAccount> findByWalletAddress(String walletAddress);
 }

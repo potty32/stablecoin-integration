@@ -29,9 +29,9 @@ public class ComplianceService {
 
     @CircuitBreaker(name = "chainalysis", fallbackMethod = "screenAddressFallback")
     @Transactional
-    public void screenAndAssert(String walletAddress, UUID transactionId, String userId) {
+    public void screenAndAssert(String walletAddress, UUID transactionId, String userId, String direction) {
         AddressScreenResponseDto result = chainalysisClient.screenAddress(
-                new AddressScreenRequestDto(walletAddress, "USDC", "POLYGON", "outgoing")
+                new AddressScreenRequestDto(walletAddress, "USDC", "POLYGON", direction)
         );
 
         AuditLog entry = new AuditLog();
@@ -67,7 +67,7 @@ public class ComplianceService {
         log.info("[COMPLIANCE OK] tx={} address={} riskScore={}", transactionId, walletAddress, result.riskScore());
     }
 
-    private void screenAddressFallback(String walletAddress, UUID transactionId, String userId, Throwable ex) {
+    private void screenAddressFallback(String walletAddress, UUID transactionId, String userId, String direction, Throwable ex) {
         if (ex instanceof ComplianceBlockException cbe) {
             throw cbe;
         }

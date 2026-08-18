@@ -45,7 +45,7 @@ class ComplianceServiceTest {
                 "0xabc", "LOW", List.of(), false, true);
         when(chainalysisClient.screenAddress(any(AddressScreenRequestDto.class))).thenReturn(response);
 
-        complianceService.screenAndAssert("0xabc", txId, "user-1");
+        complianceService.screenAndAssert("0xabc", txId, "user-1", "outgoing");
 
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditLogRepository, times(1)).save(captor.capture());
@@ -60,7 +60,7 @@ class ComplianceServiceTest {
                 "0xbad", "HIGH", List.of("SANCTIONS"), false, false);
         when(chainalysisClient.screenAddress(any(AddressScreenRequestDto.class))).thenReturn(response);
 
-        assertThatThrownBy(() -> complianceService.screenAndAssert("0xbad", txId, "user-2"))
+        assertThatThrownBy(() -> complianceService.screenAndAssert("0xbad", txId, "user-2", "outgoing"))
                 .isInstanceOf(ComplianceBlockException.class)
                 .hasMessageContaining("0xbad");
 
@@ -77,7 +77,7 @@ class ComplianceServiceTest {
         UUID txId = UUID.randomUUID();
         when(chainalysisClient.screenAddress(any())).thenThrow(new RuntimeException("connection timeout"));
 
-        assertThatThrownBy(() -> complianceService.screenAndAssert("0xabc", txId, "user-3"))
+        assertThatThrownBy(() -> complianceService.screenAndAssert("0xabc", txId, "user-3", "outgoing"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("connection timeout");
 

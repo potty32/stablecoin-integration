@@ -34,6 +34,7 @@ public interface StablecoinTransactionRepository extends JpaRepository<Stablecoi
             UUID customerAccountId, TransactionType type, TransactionStatus status);
 
     Optional<StablecoinTransaction> findByCircleTransactionId(String circleTransactionId);
+    Optional<StablecoinTransaction> findByBlockchainHash(String blockchainHash);
 
     List<StablecoinTransaction> findByStatusIn(Collection<TransactionStatus> statuses);
 }

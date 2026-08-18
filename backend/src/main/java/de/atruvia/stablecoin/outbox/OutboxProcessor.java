@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin.outbox;
 
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.client.CircleWalletClient;
 import de.atruvia.stablecoin.client.N8nWebhookClient;
 import de.atruvia.stablecoin.client.dto.CircleTransactionStatusDto;
@@ -11,6 +12,7 @@ import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.repository.OutboxMessageRepository;
 import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
+import de.atruvia.stablecoin.service.inbound.InboundProcessingService;
 import de.atruvia.stablecoin.service.revenue.RevenueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,9 +41,12 @@ public class OutboxProcessor {
     private final CircleWalletClient circleWalletClient;
     private final RevenueService revenueService;
 
-    // @Lazy verhindert zirkuläre Abhängigkeit OutboxProcessor ↔ B2bTransferService
+    // @Lazy verhindert zirkuläre Abhängigkeiten
     @Lazy @Autowired
     private B2bTransferService transferService;
+
+    @Lazy @Autowired
+    private InboundProcessingService inboundProcessingService;
 
     public OutboxProcessor(
             OutboxMessageRepository outboxRepository,
@@ -89,12 +95,57 @@ public class OutboxProcessor {
 
     private void processMessage(OutboxMessage msg) {
         switch (msg.getEventType()) {
-            case "SUBMIT_TO_BLOCKCHAIN" -> recoverSubmitToBlockchain(msg);
-            case "TRANSACTION_SETTLED"  -> log.info("[OUTBOX] Settlement event recorded txId={}", msg.getTransactionId());
-            case "TRANSACTION_INITIATED"-> log.info("[OUTBOX] Initiation event recorded txId={}", msg.getTransactionId());
-            case "TRANSACTION_FAILED"   -> log.warn("[OUTBOX] Failed event recorded txId={}", msg.getTransactionId());
+            case "SUBMIT_TO_BLOCKCHAIN"       -> recoverSubmitToBlockchain(msg);
+            case "PROCESS_INBOUND_COMPLIANCE" -> recoverInboundCompliance(msg);
+            case "TRANSACTION_SETTLED"        -> log.info("[OUTBOX] Settlement event recorded txId={}", msg.getTransactionId());
+            case "TRANSACTION_INITIATED"      -> log.info("[OUTBOX] Initiation event recorded txId={}", msg.getTransactionId());
+            case "TRANSACTION_FAILED"         -> log.warn("[OUTBOX] Failed event recorded txId={}", msg.getTransactionId());
             default -> log.debug("[OUTBOX] Unhandled event type={} txId={}", msg.getEventType(), msg.getTransactionId());
         }
+    }
+
+    /**
+     * Crash-Recovery für Inbound-Compliance-Flow.
+     * Wenn System nach INCOMING committed ist, aber vor COMPLIANCE_PENDING crasht,
+     * startet der OutboxProcessor den Compliance-Flow neu.
+     */
+    private void recoverInboundCompliance(OutboxMessage msg) {
+        UUID txId = msg.getTransactionId();
+        StablecoinTransaction tx = txRepository.findById(txId).orElse(null);
+
+        if (tx == null) {
+            log.warn("[INBOUND-RECOVERY] TX {} nicht in DB — Outbox als SENT markieren", txId);
+            return;
+        }
+
+        TransactionStatus status = tx.getStatus();
+        log.info("[INBOUND-RECOVERY] TX={} status={}", txId, status);
+
+        // Terminal-Zustände: bereits verarbeitet
+        if (EnumSet.of(TransactionStatus.SETTLED, TransactionStatus.FAILED,
+                       TransactionStatus.COMPLIANCE_APPROVED, TransactionStatus.COMPLIANCE_REJECTED).contains(status)) {
+            log.info("[INBOUND-RECOVERY] TX {} bereits in Endzustand {} — keine Recovery nötig", txId, status);
+            return;
+        }
+
+        // INCOMING: Compliance-Flow neu starten (idempotent dank COMPLIANCE_PENDING als Zwischenstatus)
+        if (status == TransactionStatus.INCOMING) {
+            log.info("[INBOUND-RECOVERY] Starte Compliance-Flow für TX={}", txId);
+            TenantContext.set(tx.getTenantId());
+            try {
+                inboundProcessingService.executeInboundComplianceFlow(
+                        txId,
+                        tx.getSourceWallet(),
+                        tx.getCurrency(),
+                        tx.getAmountFiat(),
+                        tx.getCustomerAccount().getIban());
+            } finally {
+                TenantContext.clear();
+            }
+            return;
+        }
+
+        log.warn("[INBOUND-RECOVERY] Unerwarteter Status {} für TX={} — manueller Eingriff prüfen", status, txId);
     }
 
     /**
