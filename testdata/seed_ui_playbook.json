@@ -1,0 +1,310 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "created": "2026-08-18",
+    "description": "UI Playbook-Szenarien für das Dev-Portal. Jeder Eintrag beschreibt einen Use Case mit Testdaten, Klickfolge und API-Payload.",
+    "usage": "Dieses JSON ist die Single Source of Truth für alle Playbook-Einträge. Änderungen hier -> DevPortalComponent laden und Datenstruktur angleichen."
+  },
+  "tenants": [
+    {
+      "id": "tenant-kleine-vb",
+      "name": "Volksbank Kleinstadt eG",
+      "short": "VB Klein",
+      "type": "COOPERATIVE",
+      "color": "#86efac",
+      "bg": "#052e16",
+      "defaultB2bCustomer": "cust-b2b-001",
+      "defaultB2cCustomer": "cust-b2c-001"
+    },
+    {
+      "id": "tenant-grosse-vb",
+      "name": "Volksbank Metropole eG",
+      "short": "VB Metro",
+      "type": "COOPERATIVE",
+      "color": "#93c5fd",
+      "bg": "#1e3a5f",
+      "defaultB2bCustomer": "cust-b2b-001",
+      "defaultB2cCustomer": "cust-b2c-001"
+    },
+    {
+      "id": "tenant-marktbank",
+      "name": "Marktbank AG",
+      "short": "Markt",
+      "type": "BANK",
+      "color": "#c4b5fd",
+      "bg": "#4a1d96",
+      "defaultB2bCustomer": "cust-b2b-001",
+      "defaultB2cCustomer": "cust-b2c-001"
+    }
+  ],
+  "users": [
+    {
+      "customerId": "cust-b2b-001",
+      "name": "Müller GmbH",
+      "role": "Initiator/Admin",
+      "iban": "DE89370400440532013000",
+      "walletAddress": "0xBankB2BWallet000000000000000000000000001",
+      "type": "B2B",
+      "kycTier": "TIER_3",
+      "txLimitSingle": 25000,
+      "txLimitDaily": 2000000
+    },
+    {
+      "customerId": "cust-b2c-001",
+      "name": "Max Mustermann",
+      "role": "Privatkunde",
+      "iban": "DE27200400600532013001",
+      "walletAddress": "0xBankB2CWallet000000000000000000000000002",
+      "type": "B2C",
+      "kycTier": "TIER_2",
+      "txLimitSingle": 5000,
+      "txLimitDaily": 10000
+    }
+  ],
+  "wallets": {
+    "lowRisk": "0xA100000000000000000000000000000000000001",
+    "highRisk_aml": "0xDEAD000000000000000000000000000000000000",
+    "unknown": "0xUNKNOWN0000000000000000000000000000001",
+    "b2bBankMaster": "0xBankB2BWallet000000000000000000000000001",
+    "b2cBankMaster": "0xBankB2CWallet000000000000000000000000002"
+  },
+  "playbook": [
+    {
+      "id": "UC-01",
+      "tab": "b2b",
+      "emoji": "💸",
+      "title": "Standard-Überweisung (< 25k)",
+      "description": "Sofortige Stablecoin-Transaktion bis 25.000 EUR ohne Vier-Augen-Freigabe.",
+      "regulatoryRef": "MiCA Art. 23 · PSD2 · ZAG §17",
+      "requiredType": "B2B",
+      "targetRoute": "/b2b/new-transfer",
+      "recommendedTenant": "tenant-kleine-vb",
+      "recommendedUser": "cust-b2b-001",
+      "testData": {
+        "sourceIban": "DE89370400440532013000",
+        "destinationWallet": "0xA100000000000000000000000000000000000001",
+        "amountEur": 1000,
+        "currency": "USDC",
+        "reference": "Testüberweisung UC-01"
+      },
+      "apiPayload": {
+        "method": "POST",
+        "path": "/api/v1/b2b/transfers",
+        "headers": { "X-Idempotency-Key": "uuid-wird-auto-generiert" },
+        "body": {
+          "sourceIban": "DE89370400440532013000",
+          "destinationWallet": "0xA100000000000000000000000000000000000001",
+          "amountEur": 1000,
+          "currency": "USDC",
+          "reference": "Testüberweisung UC-01"
+        }
+      },
+      "expectedOutcome": "status=SETTLED, blockchainHash gesetzt, settledAt gesetzt",
+      "steps": [
+        "Mandant 'Volksbank Kleinstadt' + Müller GmbH einloggen",
+        "Menü → 'Neue Überweisung'",
+        "IBAN: DE89370400440532013000, Wallet: 0xA100...0001, Betrag: 1.000 EUR",
+        "Absenden → Status: CREATED → COMPLIANCE_CHECKED → FUNDS_HELD → SUBMITTED → SETTLED"
+      ]
+    },
+    {
+      "id": "UC-02",
+      "tab": "b2b",
+      "emoji": "✋",
+      "title": "Großbetrag mit Vier-Augen",
+      "description": "Überweisungen ab 25.001 EUR erfordern Zweitzgenehmigung (§25a KWG).",
+      "requiredType": "B2B",
+      "targetRoute": "/b2b/approvals",
+      "testData": {
+        "sourceIban": "DE89370400440532013000",
+        "destinationWallet": "0xA100000000000000000000000000000000000001",
+        "amountEur": 50000,
+        "currency": "USDC"
+      },
+      "expectedOutcome": "status=PENDING_APPROVAL",
+      "steps": [
+        "Als Müller GmbH einloggen, Transfer 50.000 EUR absenden",
+        "Status: PENDING_APPROVAL",
+        "Als anderen Nutzer einloggen → Menü 'Freigaben' → Genehmigen",
+        "Status: APPROVED → SETTLED"
+      ]
+    },
+    {
+      "id": "UC-06",
+      "tab": "b2b",
+      "emoji": "🚫",
+      "title": "AML-Compliance-Block",
+      "description": "Überweisung an DEAD-Wallet wird durch Chainalysis automatisch blockiert.",
+      "requiredType": "B2B",
+      "targetRoute": "/b2b/new-transfer",
+      "testData": {
+        "destinationWallet": "0xDEAD000000000000000000000000000000000000",
+        "amountEur": 100,
+        "currency": "USDC"
+      },
+      "expectedOutcome": "status=FAILED, AuditLog enthält COMPLIANCE_BLOCK",
+      "steps": [
+        "DEAD-Wallet zur Whitelist hinzufügen (wird gescreened)",
+        "Transfer mit DEAD-Wallet als Ziel versuchen",
+        "ComplianceBlockException → TX FAILED, Hold freigegeben"
+      ]
+    },
+    {
+      "id": "UC-07",
+      "tab": "exports",
+      "emoji": "📄",
+      "title": "CAMT.053 Export",
+      "description": "ISO 20022 CAMT.053.001.08 XML-Download aller SETTLED Transaktionen.",
+      "requiredType": "ANY",
+      "targetRoute": "/b2b/transfers",
+      "apiPayload": {
+        "method": "GET",
+        "path": "/api/v1/b2b/export/camt053"
+      },
+      "expectedOutcome": "XML-Datei mit Stmt + Ntry-Elementen"
+    },
+    {
+      "id": "UC-08",
+      "tab": "exports",
+      "emoji": "📊",
+      "title": "DATEV CSV Export",
+      "description": "DATEV-kompatibles CSV für Steuerberater und Buchhaltung.",
+      "requiredType": "ANY",
+      "targetRoute": "/b2b/transfers",
+      "apiPayload": {
+        "method": "GET",
+        "path": "/api/v1/b2b/export/datev"
+      },
+      "expectedOutcome": "CSV mit Datum, Belegnummer, Betrag_EUR, Status..."
+    },
+    {
+      "id": "UC-11",
+      "tab": "b2c",
+      "emoji": "🌍",
+      "title": "Remittance (Auslandsüberweisung)",
+      "description": "Günstige Sofort-Auslandsüberweisung via Stablecoin für Privatkunden.",
+      "requiredType": "B2C",
+      "targetRoute": "/b2c/remittances",
+      "testData": {
+        "sourceIban": "DE27200400600532013001",
+        "destinationWallet": "0xA100000000000000000000000000000000000001",
+        "amountEur": 500,
+        "currency": "EURC"
+      }
+    },
+    {
+      "id": "UC-12",
+      "tab": "b2c",
+      "emoji": "📱",
+      "title": "P2P per Telefonnummer",
+      "description": "Geldtransfer an Handynummer. Hash: HMAC-SHA256 (DSGVO-konform, G-14).",
+      "requiredType": "B2C",
+      "targetRoute": "/b2c/p2p",
+      "testData": {
+        "sourceIban": "DE27200400600532013001",
+        "recipientPhone": "+49 151 12345678",
+        "amountEur": 50,
+        "note": "Empfänger muss Telefonnummer vorher registriert haben"
+      }
+    },
+    {
+      "id": "UC-16",
+      "tab": "b2c",
+      "emoji": "💰",
+      "title": "Yield-Sparkonto eröffnen",
+      "description": "3,5% p.a. auf EURC-Guthaben. Jahresabschluss via AtruviaTaxClient (G-15).",
+      "requiredType": "B2C",
+      "targetRoute": "/b2c/yield",
+      "testData": {
+        "sourceIban": "DE27200400600532013001",
+        "amountEur": 2000
+      }
+    },
+    {
+      "id": "UC-22",
+      "tab": "compliance",
+      "emoji": "🔍",
+      "title": "Nachtlicher Sanctions-Batch",
+      "description": "Prüft alle aktiven Wallets gegen OFAC + EU Sanctions List.",
+      "requiredType": "ANY",
+      "apiPayload": {
+        "method": "POST",
+        "path": "/api/v1/b2b/admin/sanctions-scan"
+      }
+    },
+    {
+      "id": "UC-27",
+      "tab": "compliance",
+      "emoji": "📡",
+      "title": "Inbound Webhook (Stablecoin-Eingang)",
+      "description": "Simuliert eingehenden Circle/Taurus-Webhook mit HMAC-Signaturprüfung (G-14).",
+      "requiredType": "ANY",
+      "apiPayload": {
+        "method": "POST",
+        "path": "/api/v1/b2b/inbound/webhook",
+        "body": {
+          "walletId": "0xBankB2BWallet000000000000000000000000001",
+          "amount": 1000,
+          "currency": "USDC",
+          "blockchainHash": "0x<auto-generated>",
+          "senderWallet": "0xA100000000000000000000000000000000000001"
+        }
+      },
+      "scenarios": {
+        "lowRisk": { "senderWallet": "0xA100000000000000000000000000000000000001", "expectedStatus": "SETTLED" },
+        "highRisk": { "senderWallet": "0xDEAD000000000000000000000000000000000000", "expectedStatus": "FAILED + AML_INBOUND_BLOCK" },
+        "unassigned": { "walletId": "0xUNKNOWN0000000000000000000000000000001", "expectedStatus": "UNASSIGNED (Sammelkonto)" }
+      }
+    },
+    {
+      "id": "UC-29a",
+      "tab": "exports",
+      "emoji": "📩",
+      "title": "CAMT.054 Echtzeit-Avisierung",
+      "description": "ISO 20022 CAMT.054.001.08 für ERP-Gutschriften (SAP). CdtDbtInd=CRDT.",
+      "requiredType": "ANY",
+      "apiPayload": {
+        "method": "GET",
+        "path": "/api/v1/b2b/export/camt054"
+      }
+    },
+    {
+      "id": "UC-29b",
+      "tab": "exports",
+      "emoji": "📨",
+      "title": "CAMT.029 Rejection-Nachricht",
+      "description": "ISO 20022 CAMT.029.001.09 für INBOUND_RETURN Transaktionen.",
+      "requiredType": "ANY",
+      "apiPayload": {
+        "method": "GET",
+        "path": "/api/v1/b2b/export/camt029?since=<ISO-DateTime>"
+      }
+    },
+    {
+      "id": "G-07",
+      "tab": "compliance",
+      "emoji": "🚨",
+      "title": "Emergency Kill Switch",
+      "description": "DORA Art. 17 Emergency Stop. Blockiert alle Schreib-Requests (HTTP 503 SYSTEM_003).",
+      "requiredType": "ANY",
+      "apiPayload": {
+        "activate": { "method": "POST", "path": "/api/v1/b2b/admin/kill-switch/activate", "body": { "scope": "GLOBAL", "reason": "Test-Notfall-Stop" } },
+        "deactivate": { "method": "POST", "path": "/api/v1/b2b/admin/kill-switch/deactivate", "body": { "scope": "GLOBAL" } }
+      }
+    },
+    {
+      "id": "G-12",
+      "tab": "bafin",
+      "emoji": "🌐",
+      "title": "Travel Rule (FATF Rec. 16)",
+      "description": "Pflichtfelder für Transfers > 15.000 EUR. Error: FATF_001 (HTTP 400).",
+      "requiredType": "B2B",
+      "testData": {
+        "amountEur": 20000,
+        "beneficiaryName": "Mustermann Holdings GmbH",
+        "beneficiaryAddress": "Hauptstraße 1, 60311 Frankfurt",
+        "beneficiaryAccountId": "DE89370400440532013001"
+      }
+    }
+  ]
+}

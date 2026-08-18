@@ -4,11 +4,19 @@ import { Router } from '@angular/router';
 
 const authGuard = () => {
   if (localStorage.getItem('access_token')) return true;
-  return inject(Router).createUrlTree(['/login']);
+  return inject(Router).createUrlTree(['/dev-portal']);
 };
 
 export const routes: Routes = [
-  { path: '', redirectTo: '/b2b/transfers', pathMatch: 'full' },
+  {
+    path: '',
+    redirectTo: '/dev-portal',
+    pathMatch: 'full'
+  },
+  {
+    path: 'dev-portal',
+    loadComponent: () => import('./features/dev-portal/dev-portal.component').then(m => m.DevPortalComponent)
+  },
   {
     path: 'login',
     loadComponent: () => import('./features/login/login.component').then(m => m.LoginComponent)
@@ -23,5 +31,5 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadChildren: () => import('./features/b2c/b2c.routes').then(m => m.B2C_ROUTES)
   },
-  { path: '**', redirectTo: '/b2b/transfers' }
+  { path: '**', redirectTo: '/dev-portal' }
 ];

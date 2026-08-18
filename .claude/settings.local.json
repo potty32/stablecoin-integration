@@ -16,7 +16,10 @@
       "Bash(sudo -u postgres psql -c \"CREATE USER stableuser WITH PASSWORD 'stablepass';\")",
       "Bash(sudo -u postgres psql -c \"\\\\l\")",
       "Bash(sudo -u postgres psql -c \"CREATE DATABASE stabledb OWNER stableuser;\")",
-      "Bash(sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE stabledb TO stableuser;\")"
+      "Bash(sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE stabledb TO stableuser;\")",
+      "Bash(node -version)",
+      "Bash(pg_isready)",
+      "Bash(git config *)"
     ]
   }
 }

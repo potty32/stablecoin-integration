@@ -1,13 +1,15 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-18** (Sprint-Abschluss) | GitHub: https://github.com/potty32/stablecoin-integration
-> **Commits 2026-08-18 (8 Commits):**
+> Letzte Aktualisierung: **2026-08-18** (Sprint-Abschluss + Dev-Portal) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commits 2026-08-18 (9 Commits):**
 > `68bb995` RLS → `a607b2e` Inbound → `1f06eba` Konsolidierung →
 > `1cd16f5` Security (Webhook-Signatur, OutboxProcessor RLS-Fix) →
 > `87989d9` Enterprise (UC-29/30/31) →
 > `a3292e8` BaFin G-01–G-07 (Buchungskreislauf, Tax, TenantSettings, KillSwitch) →
-> `f31336e` BaFin G-08–G-15 (Operative + Compliance Gaps)
-> **Tests:** 125 | 0 Failures | **Flyway:** V1–V18
+> `f31336e` BaFin G-08–G-15 (Operative + Compliance Gaps) →
+> `887b6f6` Docs Sprint-Abschluss →
+> `<aktuell>` feat: Dev-Portal + UC Playbook (Angular 18)
+> **Tests:** 125 | 0 Failures | **Flyway:** V1–V18 | **Frontend:** Angular 18 + Dev-Portal
 > Commits gestern (2026-08-17): `653ade6` → `517fa52` → `9ec182d` → `b8193eb` → `26d0dad` → `7eff98d` → `6431644` → `a7fc187` → `19e41ba` → `1715a55`
 
 ---
@@ -482,6 +484,16 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 - ✅ G-15: YieldYearEndService @Scheduled(31.12. 23:30)
 
 **125 Tests — 0 Failures | Flyway V1–V18 | QA_REVIEW_CHANGES.md vollständig**
+
+**Dev-Portal implementiert** (neuester Commit):
+- ✅ `features/dev-portal/dev-portal.component.ts` — interaktive Startseite
+- ✅ 5 Playbook-Tabs: B2B Outbound, B2C Retail, Compliance, Exporte, BaFin-Gaps
+- ✅ Webhook-Simulator (UC-27) mit LOW/HIGH/UNBEKANNT Szenarien
+- ✅ Export-Downloads: CAMT.053, CAMT.054, CAMT.029, DATEV direkt aus UI
+- ✅ Tenant-Login-Gate (3 Volksbanken + B2B/B2C Benutzer)
+- ✅ System-Health-Widget (Live `/actuator/health`)
+- ✅ Architektur-Diagramm (Dual-Rail + RLS Multi-Tenancy)
+- ✅ `testdata/seed_ui_playbook.json` — strukturiertes Playbook-Datenmodell
 
 ### Offene Punkte (verbleibend)
 

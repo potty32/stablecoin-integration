@@ -1,8 +1,55 @@
 # Use Cases — Atruvia Stablecoin Integration Platform · Version 3
 
-> **Stand: 2026-08-18 (Sprint-Abschluss)** | Commits: `68bb995` → `f31336e` (8 Commits)  
-> Vollständige Dokumentation aller **34 Use Cases** (UC-01–UC-31 + G-01–G-15 Gap-Fixes).  
-> Alle Änderungen aus Session 1–7 sind eingearbeitet.
+> **Stand: 2026-08-18 (Sprint-Abschluss)** | Commits: `68bb995` → `887b6f6` (9 Commits)  
+> Vollständige Dokumentation aller **34+ Use Cases** (UC-01–UC-31 + G-01–G-15 Gap-Fixes + Dev-Portal).  
+> Alle Änderungen aus Session 1–8 sind eingearbeitet.
+
+---
+
+## 🚀 Interaktives Dev-Portal — Einstiegspunkt
+
+```
+URL: http://localhost:4200/dev-portal  (Startseite nach Login)
+     http://localhost:4200/            (Redirect zu /dev-portal)
+```
+
+Das Dev-Portal ermöglicht **interaktives Durchspielen aller Use Cases** ohne Dokumentationsstudium:
+
+| Feature | Beschreibung |
+|---|---|
+| **System-Health** | Live-Anzeige ob Backend (Spring Boot) erreichbar ist |
+| **Architektur-Diagramm** | Dual-Rail (SWIFT vs. Stablecoin) + RLS Multi-Tenancy visuell erklärt |
+| **Playbook Tabs** | B2B Outbound · B2C Retail · Compliance & Admin · Exporte · BaFin-Gaps |
+| **Testdaten** | Jeder UC zeigt vorbereitete IBAN, Wallet-Adressen, Beträge |
+| **Klickfolge** | Schritt-für-Schritt Anleitung für jeden UC |
+| **Direkt-Start** | Einloggen + Navigation zur Zielseite per Button |
+| **Login-Gate** | Mandanten-Dropdown (3 Volksbanken) + Benutzer-Dropdown (B2B/B2C) |
+| **Webhook-Simulator** | UC-27: Inbound-Webhook direkt aus UI triggern (LOW/HIGH/UNBEKANNT) |
+| **Export-Downloads** | CAMT.053, CAMT.054, CAMT.029, DATEV-CSV per Button |
+| **Sanctions-Trigger** | Nachtbatch manuell auslösen (UC-22) |
+
+### Schnellstart
+
+```bash
+# Terminal 1: Backend starten
+cd backend && SPRING_PROFILES_ACTIVE=dev java -jar target/stablecoin-backend-1.0.0.jar
+
+# Terminal 2: Frontend starten  
+cd frontend && npx ng serve
+
+# Browser öffnen
+open http://localhost:4200
+# → Automatisch zu /dev-portal umgeleitet
+
+# Mandant wählen: Volksbank Kleinstadt eG
+# Benutzer wählen: Müller GmbH (B2B, Initiator)
+# "Als Testnutzer einloggen" klicken
+# → Tab "B2B Outbound" → UC-01 → "🚀 Direkt-Start"
+```
+
+### Playbook-Szenarien (strukturiert)
+
+Alle Szenarien sind auch als JSON-Datenmodell verfügbar: `testdata/seed_ui_playbook.json`
 
 ---
 

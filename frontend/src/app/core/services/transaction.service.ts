@@ -23,9 +23,11 @@ export interface AddressBookEntry {
 
 export interface TransactionResponse {
   transactionId: string;
-  type: 'OUTBOUND' | 'INBOUND' | 'BULK' | 'P2P' | 'REMITTANCE' | 'YIELD_DEPOSIT' | 'YIELD_REDEEM';
+  type: 'OUTBOUND' | 'INBOUND' | 'BULK' | 'P2P' | 'REMITTANCE' | 'YIELD_DEPOSIT' | 'YIELD_REDEEM' | 'INBOUND_RETURN';
   status: 'CREATED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXPIRED' |
-          'COMPLIANCE_CHECKED' | 'FUNDS_HELD' | 'SUBMITTED' | 'SETTLED' | 'REDEEMED' | 'FAILED';
+          'COMPLIANCE_CHECKED' | 'FUNDS_HELD' | 'SUBMITTED' | 'SETTLED' | 'REDEEMED' | 'FAILED' |
+          'INCOMING' | 'COMPLIANCE_PENDING' | 'COMPLIANCE_APPROVED' | 'COMPLIANCE_REJECTED' |
+          'UNASSIGNED' | 'RETURNED';
   amountFiat: number;
   amountStablecoin: number;
   currency: 'USDC' | 'EURC';
@@ -183,5 +185,69 @@ export class TransactionService {
 
   revokeAddress(id: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/b2b/address-book/${id}`);
+  }
+
+  // ── Exporte (UC-07, UC-08, UC-29, UC-10) ─────────────────────────────────
+
+  downloadCamt053(iban?: string): Observable<Blob> {
+    const url = iban ? `${this.base}/b2b/export/camt053?iban=${iban}` : `${this.base}/b2b/export/camt053`;
+    return this.http.get(url, { responseType: 'blob' });
+  }
+
+  downloadCamt054(iban?: string): Observable<Blob> {
+    const url = iban ? `${this.base}/b2b/export/camt054?iban=${iban}` : `${this.base}/b2b/export/camt054`;
+    return this.http.get(url, { responseType: 'blob' });
+  }
+
+  downloadCamt029(iban?: string): Observable<Blob> {
+    const url = iban ? `${this.base}/b2b/export/camt029?iban=${iban}` : `${this.base}/b2b/export/camt029`;
+    return this.http.get(url, { responseType: 'blob' });
+  }
+
+  downloadDatev(iban?: string): Observable<Blob> {
+    const url = iban ? `${this.base}/b2b/export/datev?iban=${iban}` : `${this.base}/b2b/export/datev`;
+    return this.http.get(url, { responseType: 'blob' });
+  }
+
+  // ── Admin-Aktionen (UC-22, G-07, G-11) ───────────────────────────────────
+
+  runSanctionsScan(): Observable<void> {
+    return this.http.post<void>(`${this.base}/b2b/admin/sanctions-scan`, {});
+  }
+
+  activateKillSwitch(scope: string, reason: string): Observable<any> {
+    return this.http.post<any>(`${this.base}/b2b/admin/kill-switch/activate`, { scope, reason });
+  }
+
+  deactivateKillSwitch(scope: string): Observable<any> {
+    return this.http.post<any>(`${this.base}/b2b/admin/kill-switch/deactivate`, { scope });
+  }
+
+  getKillSwitchStatus(): Observable<any> {
+    return this.http.get<any>(`${this.base}/b2b/admin/kill-switch/status`);
+  }
+
+  // ── Enterprise Payments (UC-27, UC-30, UC-31) ─────────────────────────────
+
+  triggerInboundWebhook(payload: {
+    walletId: string; amount: number; currency: string; blockchainHash: string; senderWallet: string;
+  }): Observable<TransactionResponse> {
+    return this.http.post<TransactionResponse>(`${this.base}/b2b/inbound/webhook`, payload);
+  }
+
+  reassignTransaction(transactionId: string, targetIban: string): Observable<TransactionResponse> {
+    return this.http.post<TransactionResponse>(`${this.base}/b2b/admin/reassign-transaction`, { transactionId, targetIban });
+  }
+
+  // ── Institutional Address Book (UC-23) ────────────────────────────────────
+
+  listInstitutionalAddressBook(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.base}/b2b/institutional-address-book`);
+  }
+
+  // ── System Health ─────────────────────────────────────────────────────────
+
+  getHealth(): Observable<{ status: string }> {
+    return this.http.get<{ status: string }>('/actuator/health');
   }
 }
