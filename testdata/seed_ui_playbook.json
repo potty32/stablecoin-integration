@@ -1,7 +1,8 @@
 {
   "_meta": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "created": "2026-08-18",
+    "e2eTest": "CrossTenantInterbankenClearanceTest (5 TCs, ~150s) — Ausführung: mvn test -Dtest=CrossTenantInterbankenClearanceTest -pl backend",
     "description": "UI Playbook-Szenarien für das Dev-Portal. Jeder Eintrag beschreibt einen Use Case mit Testdaten, Klickfolge und API-Payload.",
     "usage": "Dieses JSON ist die Single Source of Truth für alle Playbook-Einträge. Änderungen hier -> DevPortalComponent laden und Datenstruktur angleichen."
   },
@@ -291,6 +292,68 @@
         "activate": { "method": "POST", "path": "/api/v1/b2b/admin/kill-switch/activate", "body": { "scope": "GLOBAL", "reason": "Test-Notfall-Stop" } },
         "deactivate": { "method": "POST", "path": "/api/v1/b2b/admin/kill-switch/deactivate", "body": { "scope": "GLOBAL" } }
       }
+    },
+    {
+      "id": "E2E-INTERBANKEN",
+      "tab": "e2e",
+      "emoji": "🔗",
+      "title": "Mandantenübergreifender Interbanken-Clearance E2E-Test",
+      "description": "Vollständiger Clearance-Kreislauf: Müller GmbH (VB Kleinstadt) sendet 10.000 EUR USDC an Schmidt AG (VB Metropole). RLS-Isolation bewiesen via PostgreSQL-Policy.",
+      "regulatoryRef": "FATF · MiCA Art. 23 · §25a KWG · PostgreSQL RLS",
+      "requiredType": "ANY",
+      "targetRoute": "mvn test -Dtest=CrossTenantInterbankenClearanceTest -pl backend",
+      "seedFile": "testdata/seed_e2e_interbanken.sql",
+      "testClass": "CrossTenantInterbankenClearanceTest",
+      "testCases": {
+        "TC-01": { "description": "JWT-Tokens für Mandant A + B", "expected": "HTTP 200, Tokens mit tenant-Claim" },
+        "TC-02": { "description": "Outbound-Transfer Mandant A (10.000 EUR USDC)", "expected": "HTTP 201, status=SETTLED, grossRevenue≈17.49 EUR" },
+        "TC-03": { "description": "Circle-Webhook simuliert Inbound Mandant B", "expected": "HTTP 201, status=SETTLED, amountStablecoin=10000" },
+        "TC-04": { "description": "RLS-Gegencheck (Mandant A → Mandant B TX)", "expected": "HTTP 404 (PostgreSQL RLS verhindert Cross-Tenant-Zugriff)" },
+        "TC-05": { "description": "Ertragsformel R = (V×S) + F − C", "expected": "grossRevenue ≈ 17.492 EUR (15.00 + 2.50 - 0.008)" }
+      },
+      "testData": {
+        "mandantA": {
+          "tenant": "tenant-kleine-vb",
+          "customerId": "e2e-cust-b2b-001",
+          "iban": "DE89370400440532013010",
+          "wallet": "0x00000000000000000000000000000000E2E1A001",
+          "name": "Müller GmbH (E2E)"
+        },
+        "mandantB": {
+          "tenant": "tenant-grosse-vb",
+          "customerId": "e2e-cust-b2b-002",
+          "iban": "DE89370400440532013002",
+          "wallet": "0x00000000000000000000000000000000E2E1B002",
+          "name": "Schmidt AG (E2E)"
+        },
+        "transferAmount": 10000,
+        "currency": "USDC",
+        "mockFxRate": 1.0823,
+        "fxSpread": 0.0015,
+        "flatFee": 2.50,
+        "gasCost": 0.008,
+        "expectedGrossRevenue": 17.492,
+        "expectedAmountStablecoin": 10823
+      },
+      "revenueFormula": {
+        "formula": "R = (V × S) + F - C",
+        "V": "10000.00 EUR (Volumen)",
+        "S": "0.0015 (FX-Spread, 0.15%)",
+        "F": "2.50 EUR (Flat-Gebühr)",
+        "C": "0.008 EUR (Gas-Kosten Mock)",
+        "result": "17.492 EUR",
+        "specVersion": "17.50 EUR (Spec ignoriert Gaskosten)"
+      },
+      "specKorrekturen": [
+        "customer_name → nicht im Schema (entfernt)",
+        "balance_eur → nicht im Schema (entfernt)",
+        "kyc_status → kyc_tier (korrigiert)",
+        "TRUNCATE → ON CONFLICT DO NOTHING (nicht destruktiv)",
+        "tenant type KLEINE_VB → COOPERATIVE (Schema-konform)",
+        "/b2c/inbound/webhook → /b2b/inbound/webhook (korrekter Pfad)",
+        "grossRevenue 17.50 → 17.492 EUR (gasCostSimulated=0.008 berücksichtigt)",
+        "JWT via /api/v1/auth/dev-token (statt Python-Skript)"
+      ]
     },
     {
       "id": "G-12",

@@ -28,6 +28,30 @@ Das Dev-Portal ermöglicht **interaktives Durchspielen aller Use Cases** ohne Do
 | **Export-Downloads** | CAMT.053, CAMT.054, CAMT.029, DATEV-CSV per Button |
 | **Sanctions-Trigger** | Nachtbatch manuell auslösen (UC-22) |
 
+### E2E-Testausführung (Interbanken-Clearance)
+
+```bash
+# Vollständiger E2E-Test: Mandantenübergreifender Stablecoin-Transfer
+mvn test -Dtest=CrossTenantInterbankenClearanceTest -pl backend
+
+# Testsuite gesamt (130 Tests)
+mvn test -pl backend
+```
+
+**Test:** `CrossTenantInterbankenClearanceTest` (5 TCs, ~150s)
+
+| TC | Beschreibung | Erwartung |
+|---|---|---|
+| TC-01 | JWT-Tokens für Mandant A + B | HTTP 200, Tokens mit tenant-Claim |
+| TC-02 | Outbound-Transfer Mandant A (10.000 EUR USDC) | HTTP 201, status=SETTLED |
+| TC-03 | Circle-Webhook simuliert Eingang Mandant B | HTTP 201, status=SETTLED, USDC=10.000 |
+| TC-04 | RLS-Gegencheck (Mandant A sieht Mandant B TX nicht) | HTTP 404 (PostgreSQL RLS) |
+| TC-05 | Ertragsformel R = (V×S) + F − C ≈ 17,492 EUR | grossRevenue ≈ 17.49 EUR |
+
+**Seed-Daten:** `testdata/seed_e2e_interbanken.sql`
+
+---
+
 ### Schnellstart
 
 ```bash

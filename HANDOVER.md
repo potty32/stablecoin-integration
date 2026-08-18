@@ -485,7 +485,17 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 
 **125 Tests — 0 Failures | Flyway V1–V18 | QA_REVIEW_CHANGES.md vollständig**
 
-**Dev-Portal implementiert** (neuester Commit):
+**E2E-Test: Mandantenübergreifende Interbanken-Clearance** (neuester Commit):
+- ✅ `CrossTenantInterbankenClearanceTest.java` — 5 TCs, vollständiger E2E-Kreislauf
+- ✅ TC-01: JWT-Token-Generierung (beide Mandanten via `/api/v1/auth/dev-token`)
+- ✅ TC-02: Outbound-Transfer Mandant A → SETTLED + grossRevenue-Prüfung
+- ✅ TC-03: Inbound-Webhook Mandant B → SETTLED (Circle-Simulation)
+- ✅ TC-04: RLS-Isolation mathematisch bewiesen (Mandant A → 404 für Mandant B TX)
+- ✅ TC-05: Ertragsformel R = (V×S) + F − C ≈ 17.492 EUR verifiziert
+- ✅ `testdata/seed_e2e_interbanken.sql` — korrigierte Testdaten (8 Spec-Fehler dokumentiert)
+- ✅ 130 Tests | 0 Failures | 0 Errors
+
+**Dev-Portal implementiert** (vorheriger Commit):
 - ✅ `features/dev-portal/dev-portal.component.ts` — interaktive Startseite
 - ✅ 5 Playbook-Tabs: B2B Outbound, B2C Retail, Compliance, Exporte, BaFin-Gaps
 - ✅ Webhook-Simulator (UC-27) mit LOW/HIGH/UNBEKANNT Szenarien
