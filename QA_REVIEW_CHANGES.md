@@ -1,499 +1,291 @@
-# QA Review — Sprint 2026-08-18
-## Atruvia Stablecoin Integration Platform
+# QA Review — Änderungsdokumentation
+## Atruvia Stablecoin Integration Platform — Sprint-Abschluss 2026-08-18
 
-> **Review-Datum:** 2026-08-18  
-> **Reviewer:** QS-Team / Principal Engineering  
-> **Commits:** `68bb995` (Multi-Tenancy RLS) · `a607b2e` (Inbound Processing)  
-> **Branch:** `main` — https://github.com/potty32/stablecoin-integration
+> **Klassifizierung:** INTERN · Für Code-Review und BaFin-Auditierung  
+> **Reviewer:** Principal Core Banking Architect & BaFin Lead Compliance Auditor  
+> **Commit-Range:** `68bb995` → `f31336e` (8 Commits, 1 Tag)  
+> **Tests:** 125 | 0 Failures | 0 Errors  
+> **Flyway:** V1–V18 (9 neue Migrationen heute)
 
 ---
 
 ## 1. Executive Summary
 
-| Feature | Status | Tests | Risiko |
-|---|---|---|---|
-| Multi-Tenancy (RLS) | ✅ Implementiert & getestet | 5 TCs grün | Mittel — DB-Schema-Breaking-Change |
-| Inbound Webhook Processing | ✅ Implementiert & getestet | 2 TCs grün | Niedrig — neuer Pfad, kein Eingriff in Outbound |
-| Bestehende Tests | ✅ Alle grün | 99 → 106 gesamt | — |
-| Flyway Migrationen | ✅ V8 + V9 clean | — | — |
+Dieser Sprint erweitert die Atruvia Stablecoin Integration Platform um drei Hauptbereiche:
+
+1. **Sicherheitsschicht** — Webhook-Signaturvalidierung (HMAC-SHA256), OutboxProcessor RLS-Fix, Telefonnummer-Hash-Härtung
+2. **Enterprise Payment Features** — CAMT.054 Echtzeit-Avisierung, automatische Retouren (R-Transaktionen), Sammelkonto-Prinzip
+3. **BaFin-Gap-Schließung** — 15 Compliance-Lücken (G-01 bis G-15) aus dem Functional Audit behoben
 
 ---
 
-## 2. Architektur-Modifikationen
+## 2. Commit-Übersicht
 
-### 2.1 Multi-Tenancy via PostgreSQL Row-Level Security (Commit `68bb995`)
-
-**Ziel:** Vollständige Datenisolation zwischen Volksbank-Mandanten auf DB-Ebene.
-
-**Muster:** Shared-Database + Logical Tenant Discriminator + PostgreSQL RLS als Defense-in-Depth.
-
-#### 2.1.1 Datenbanknutzer-Trennung
-
-```
-stablecoin       → Migration-Owner (DDL, BYPASSRLS via ALTER ROLE)
-stablecoin_app   → App-Runtime  (kein BYPASSRLS, unterliegt RLS-Policies)
-```
-
-**Spring-Konfiguration (application-dev.yml):**
-```yaml
-spring:
-  datasource:             # JPA/Hibernate → stablecoin_app (RLS aktiv)
-    username: stablecoin_app
-  flyway:                 # Flyway-Migrationen → stablecoin (BYPASSRLS)
-    user: stablecoin
-```
-
-#### 2.1.2 Tenant-Propagation (Request → DB)
-
-```
-HTTP Request
-  │ JWT: {sub: "cust-b2b-001", tenant: "tenant-kleine-vb", ...}
-  ▼
-JwtAuthFilter
-  └── TenantContext.set("tenant-kleine-vb")  [ThreadLocal]
-  ▼
-TenantAwareDataSource.getConnection()
-  └── set_config('app.current_tenant', 'tenant-kleine-vb', false)  [Session-Level]
-  ▼
-PostgreSQL RLS-Policy
-  └── USING (tenant_id = current_setting('app.current_tenant', true))
-  ▼
-Nur Rows mit tenant_id = 'tenant-kleine-vb' sichtbar
-  ▼
-JwtAuthFilter.finally → TenantContext.clear()
-```
-
-#### 2.1.3 Automatisches tenant_id-Setzen
-
-`TenantEntityListener.@PrePersist` liest `TenantContext.get()` → setzt `entity.tenantId` automatisch auf allen 5 RLS-Tabellen.
-
-#### 2.1.4 Webhook-Spezialfall (Cross-Tenant-Lookup)
-
-Inbound-Webhooks tragen keinen JWT → kein initialer TenantContext.
-
-```java
-// adminJdbcTemplate (stablecoin, BYPASSRLS) für initialen Wallet-Lookup
-Map<String, Object> row = adminJdbcTemplate.queryForList(
-    "SELECT id, tenant_id FROM customer_account WHERE wallet_address = ?", walletId).get(0);
-TenantContext.set((String) row.get("tenant_id"));
-// → Alle weiteren Operationen laufen mit korrektem Tenant-Kontext
-```
-
----
-
-### 2.2 Inbound Stablecoin Processing (Commit `a607b2e`)
-
-**Ziel:** Empfang von USDC/EURC auf Kunden-Wallets mit Post-Receive AML-Screening und automatischer Core-Banking-Gutschrift.
-
-#### 2.2.1 Prozessablauf
-
-```
-POST /api/v1/b2b/inbound/webhook (Circle/Taurus → Bank)
-  │
-  ├─ 1. Cross-Tenant Account-Lookup (adminJdbcTemplate, BYPASSRLS)
-  ├─ 2. TenantContext.set(account.tenantId)
-  ├─ 3. Idempotenz: findByBlockchainHash → 409 wenn Duplikat
-  ├─ 4. TX INSERT: CREATED → INCOMING [REQUIRES_NEW]
-  │       OutboxMsg: PROCESS_INBOUND_COMPLIANCE (Crash-Recovery)
-  │
-  ├─── LOW/MEDIUM-RISK-Pfad ─────────────────────────────────────────────
-  │     COMPLIANCE_PENDING → Chainalysis (direction="incoming")
-  │     FX-Konvertierung: EURC×1.0 | USDC×ECB-Rate (kein Spread!)
-  │     CoreBankingClient.createLedgerBooking() → EUR-Gutschrift
-  │     → COMPLIANCE_APPROVED → SETTLED
-  │
-  └─── HIGH-RISK-Pfad (z.B. 0xDEAD...) ──────────────────────────────────
-        COMPLIANCE_PENDING → Chainalysis → BLOCKED
-        AuditLog: action='AML_INBOUND_BLOCK' (BaFin-pflichtiger Eintrag)
-        → COMPLIANCE_REJECTED → FAILED
-        (Gelder verbleiben auf Wallet — KEINE Gutschrift)
-```
-
-#### 2.2.2 State Machine Extension
-
-```
-Vorher (Outbound-Pfad):
-CREATED → [PENDING_APPROVAL] → COMPLIANCE_CHECKED → FUNDS_HELD → SUBMITTED → SETTLED
-
-Neu (Inbound-Pfad, parallel):
-CREATED → INCOMING → COMPLIANCE_PENDING → COMPLIANCE_APPROVED → SETTLED
-                                         → COMPLIANCE_REJECTED → FAILED
-```
-
-#### 2.2.3 Crash-Recovery (Transactional Outbox)
-
-`OutboxProcessor.PROCESS_INBOUND_COMPLIANCE`:
-- TX in Status `INCOMING` beim Neustart → Compliance-Flow wird automatisch neu gestartet
-- TX in Terminal-Status → OutboxMsg als SENT markiert (kein Double-Processing)
-
----
-
-## 3. Schnittstellen-Verträge (API Contracts)
-
-### 3.1 Neuer Endpunkt: Dev-Token (nur devMode)
-
-```
-GET /api/v1/auth/dev-token?customerId={id}&tenant={tenantId}
-Authorization: keiner (permitAll)
-```
-
-**Request (Query-Parameter):**
-
-| Parameter | Pflicht | Werte |
+| Commit | Zeitpunkt | Beschreibung |
 |---|---|---|
-| `customerId` | Ja | `cust-b2b-001` \| `cust-b2c-001` |
-| `tenant` | Nein | `tenant-kleine-vb` \| `tenant-grosse-vb` \| `tenant-marktbank` \| `tenant-default` |
-
-**Response (200 OK):**
-```json
-{
-  "token": "eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJjdXN0LWIyYi0wMDEi...",
-  "tenant": "tenant-kleine-vb",
-  "customerId": "cust-b2b-001"
-}
-```
-
-**JWT-Payload (dekodiert):**
-```json
-{
-  "sub": "cust-b2b-001",
-  "tenant": "tenant-kleine-vb",
-  "iat": 1755473400,
-  "exp": 1755559800
-}
-```
+| `68bb995` | 01:28 | Multi-Tenancy via PostgreSQL RLS (V8) |
+| `a607b2e` | 02:19 | Inbound Stablecoin Processing (UC-27, V9) |
+| `1f06eba` | 02:47 | Multi-Tenancy + Inbound + Return-Logik (konsolidiert) |
+| `1cd16f5` | 07:54 | Webhook-Signatur (AUTH_002), OutboxProcessor RLS-Fix, settledAt |
+| `87989d9` | 08:58 | Enterprise Payment Features (UC-29/30/31, V10) |
+| `a3292e8` | 10:55 | BaFin Gaps G-01 bis G-07 (V11–V15) |
+| `f31336e` | 12:15 | BaFin Gaps G-08 bis G-15 (V16–V18) |
 
 ---
 
-### 3.2 Neuer Endpunkt: Inbound Webhook
+## 3. Neue Features & Use Cases
 
-```
-POST /api/v1/b2b/inbound/webhook
-Content-Type: application/json
-Authorization: keiner (permitAll — in Prod via HMAC-Signatur absichern)
-```
+### UC-27 · Inbound Stablecoin Empfang (Webhook)
 
-**Request-Body:**
-```json
-{
-  "walletId":      "0xBankB2BWallet000000000000000000000000001",
-  "amount":        1000.00,
-  "currency":      "USDC",
-  "blockchainHash":"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-  "senderWallet":  "0xA100000000000000000000000000000000000001"
-}
-```
+**Flow:** `POST /api/v1/b2b/inbound/webhook` → Cross-Tenant-Wallet-Lookup (adminJdbcTemplate) → Idempotenz-Check (blockchainHash) → `CREATED → INCOMING` + Outbox-Recovery → AML-Screening (Chainalysis) → `COMPLIANCE_PENDING → COMPLIANCE_APPROVED → SETTLED` + CoreBanking-Gutschrift
 
-| Feld | Typ | Pflicht | Beschreibung |
-|---|---|---|---|
-| `walletId` | String | Ja | Empfänger-Wallet (muss in `customer_account.wallet_address` existieren) |
-| `amount` | BigDecimal | Ja | Empfangener Betrag |
-| `currency` | String | Ja | `"USDC"` oder `"EURC"` |
-| `blockchainHash` | String | Ja | On-Chain-TX-Hash (Idempotenz-Schlüssel) |
-| `senderWallet` | String | Ja | Absender-Wallet (wird AML-gescreent) |
+**Sicherheit:** HMAC-SHA256-Signaturprüfung (`X-Circle-Signature`-Header)
 
-**Response — LOW_RISK (201 Created):**
-```json
-{
-  "transactionId": "0c38e361-1cc9-46e4-adf3-7cb3b66c86d8",
-  "type": "INBOUND",
-  "status": "SETTLED",
-  "amountFiat": 1082.300000,
-  "amountStablecoin": 1000.000000,
-  "currency": "USDC",
-  "blockchainHash": "0xabcdef...",
-  "grossRevenue": 0.0,
-  "requiresApproval": false,
-  "createdAt": "2026-08-18T02:18:18.972639",
-  "settledAt": null,
-  "timeline": []
-}
-```
-
-**Response — HIGH_RISK (201 Created, Funds BLOCKED):**
-```json
-{
-  "transactionId": "633239b2-b494-4035-8e97-9d8341ff6886",
-  "type": "INBOUND",
-  "status": "FAILED",
-  "amountFiat": 500.000000,
-  "amountStablecoin": 500.000000,
-  "currency": "EURC",
-  "blockchainHash": "0xdead...",
-  "grossRevenue": 0.0,
-  "requiresApproval": false,
-  "createdAt": "2026-08-18T02:18:19.613696",
-  "settledAt": null,
-  "timeline": []
-}
-```
-
-**Fehler-Responses:**
-
-| HTTP | Code | Ursache |
-|---|---|---|
-| 404 | `NOT_FOUND_001` | `walletId` nicht in DB (kein Kunden-Account für diese Wallet) |
-| 409 | `IDEMPOTENCY_001` | `blockchainHash` bereits verarbeitet |
-| 500 | — | Unerwarteter Systemfehler (Backend-Log prüfen) |
+**Neue Dateien:**
+- `controller/InboundWebhookController.java`
+- `service/inbound/InboundProcessingService.java`
+- `service/compliance/WebhookSignatureService.java`
+- `client/mock/MockAtruviaTaxClient.java` (G-02)
 
 ---
 
-## 4. Datenbank-Schema
+### UC-28 · Multi-Tenancy via PostgreSQL RLS
 
-### 4.1 Flyway V8 — Multi-Tenancy (2026-08-18)
-
-#### 4.1.1 Neue Tabelle: `tenant`
-
-```sql
-CREATE TABLE tenant (
-    id         VARCHAR(50)  PRIMARY KEY,
-    name       VARCHAR(100) NOT NULL,
-    type       VARCHAR(20)  NOT NULL,
-    rls_active BOOLEAN      NOT NULL DEFAULT true
-);
+**Architektur:**
+```
+JWT {tenant: "tenant-kleine-vb"}
+  └─ JwtAuthFilter → TenantContext.set()
+  └─ TenantAwareDataSource → set_config('app.current_tenant', ...)
+  └─ PostgreSQL RLS-Policy: USING (tenant_id = current_setting('app.current_tenant', true))
 ```
 
-**Dev-Seed-Daten:**
-
-| id | name | type |
-|---|---|---|
-| `tenant-kleine-vb` | Volksbank Kleinstadt eG | COOPERATIVE |
-| `tenant-grosse-vb` | Volksbank Metropole eG | COOPERATIVE |
-| `tenant-marktbank` | Marktbank AG | BANK |
-| `tenant-default` | Default Dev Tenant | DEV |
-
-#### 4.1.2 Erweiterte Tabellen: `tenant_id`-Spalte (5 Tabellen)
-
-```sql
--- Auf jeder der 5 Tabellen:
-ALTER TABLE {tabelle} ADD COLUMN tenant_id VARCHAR(50)
-    NOT NULL REFERENCES tenant(id);
-```
-
-Betroffene Tabellen: `customer_account`, `stablecoin_transaction`, `address_book`, `yield_position`, `audit_log`
-
-Backfill: alle bestehenden Rows → `tenant_id = 'tenant-default'`
-
-#### 4.1.3 Row-Level Security
-
-```sql
--- Für alle 5 Tabellen:
-ALTER TABLE {tabelle} ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation_policy ON {tabelle}
-    USING (tenant_id = current_setting('app.current_tenant', true));
-```
-
-**Isolation-Beweis (E2E-Test):**
-```bash
-# Mandant A sieht SEINEN Account:
-TOKEN_A="...tenant=tenant-kleine-vb..."
-GET /api/v1/accounts/DE89370400440532013000/balance → 200 OK (Kontostand)
-
-# Mandant B sieht ANDEREN Account NICHT:
-TOKEN_B="...tenant=tenant-grosse-vb..."
-GET /api/v1/accounts/DE89370400440532013000/balance → 404 (RLS filtert)
-```
+**RLS-Tabellen:** `customer_account`, `stablecoin_transaction`, `address_book`, `yield_position`, `audit_log`  
+**Tenant-freie Tabellen:** `institutional_address_book`, `approval_workflow`, `outbox_message`, `system_control`
 
 ---
 
-### 4.2 Flyway V9 — Inbound Status Values (2026-08-18)
+### UC-29 · CAMT.054 Echtzeit-Avisierung
 
-```sql
--- V5 CHECK-Constraint (11 Werte) → 15 Werte
-ALTER TABLE stablecoin_transaction
-    DROP CONSTRAINT stablecoin_transaction_status_check;
+- `ExportService.generateCamt054(iban)` — ISO 20022 CAMT.054.001.08
+- Filter: `type=INBOUND`, `status=SETTLED`
+- `CdtDbtInd=CRDT`, BkTxCd: `PMNT/RCDT/ESCT`
+- Endpunkt: `GET /api/v1/b2b/export/camt054?iban=...`
 
-ALTER TABLE stablecoin_transaction
-    ADD CONSTRAINT stablecoin_transaction_status_check
-    CHECK (status IN (
-        'CREATED','PENDING_APPROVAL','APPROVED','REJECTED','EXPIRED',
-        'COMPLIANCE_CHECKED','FUNDS_HELD','SUBMITTED','SETTLED','REDEEMED','FAILED',
-        'INCOMING','COMPLIANCE_PENDING','COMPLIANCE_APPROVED','COMPLIANCE_REJECTED'
-    ));
+---
+
+### UC-30 · Automatische Retouren
+
+**Trigger:** Konto-Status `SUSPENDED`/`BLOCKED` nach erfolgreichem AML-Screening.
+
+**State-Flow:**
+```
+Original INBOUND:  COMPLIANCE_APPROVED → FAILED (reason: KONTO_INAKTIV)
+Return INBOUND_RETURN: CREATED → RETURNED (direkt, da REQUIRES_NEW-Sichtbarkeitsregel)
 ```
 
-**Neue Status-Werte:**
-
-| Status | Bedeutung | Terminal? |
-|---|---|---|
-| `INCOMING` | Blockchain-Eingang registriert | Nein |
-| `COMPLIANCE_PENDING` | Post-Receive AML-Prüfung läuft | Nein |
-| `COMPLIANCE_APPROVED` | AML erfolgreich → Gutschrift | Nein |
-| `COMPLIANCE_REJECTED` | AML blockiert → führt zu FAILED | Nein (→ FAILED) |
+**Neue Felder:** `parent_transaction_id`, `TransactionType.INBOUND_RETURN`, `TransactionStatus.RETURNED`
 
 ---
 
-### 4.3 Vollständiger Flyway-Migrations-Stack
+### UC-31 · Sammelkonto-Prinzip
 
-| Version | Datei | Status |
-|---|---|---|
-| V1 | `V1__init.sql` | ✅ |
-| V2 | `V2__fix_b2b_approval_threshold.sql` | ✅ |
-| V3 | `V3__add_institutional_address_book.sql` | ✅ |
-| V4 | `V4__add_hold_id_to_transaction.sql` | ✅ |
-| V5 | `V5__update_transaction_status_enum.sql` | ✅ |
-| V6 | `V6__add_yield_position.sql` | ✅ |
-| V7 | `V7__refactor_audit_log.sql` | ✅ |
-| V8 | `V8__enable_row_level_security.sql` | ✅ **NEU** |
-| V9 | `V9__add_inbound_status_values.sql` | ✅ **NEU** |
+**Trigger:** Unbekannte Wallet-Adresse (kein matching `customer_account.wallet_address`)
+
+**Flow:**
+1. `processUnassignedInbound()` → TX auf `customer_id='unassigned-funds'` mit `status=UNASSIGNED`
+2. Admin: `POST /api/v1/b2b/admin/reassign-transaction {transactionId, targetIban}`
+3. `ReassignTransactionService.reassign()` → cross-tenant Update + CoreBanking-Buchung → `SETTLED`
 
 ---
 
-## 5. Sicherheits- & Resilienz-Metriken
+## 4. BaFin Gap-Behebungen
 
-### 5.1 Testabdeckung
+### G-01 · Buchungskreislauf (MiCA Art. 23, HGB §246) — KRITISCH
 
-**Gesamt: 106 Tests | 0 Failures | 0 Errors | 0 Skipped**
-
-| Test-Klasse | TCs | Status | Bereich |
-|---|---|---|---|
-| B2bStateMachineTest | 27 | ✅ | State Machine (inkl. neue Inbound-Übergänge) |
-| OutboxProcessorTest | 11 | ✅ | Crash-Recovery (inkl. PROCESS_INBOUND_COMPLIANCE) |
-| BulkPaymentServiceTest | 10 | ✅ | Bulk CSV |
-| GlobalExceptionHandlerTest | 10 | ✅ | Fehler-Handling |
-| ExportServiceTest | 8 | ✅ | CAMT.053 + DATEV |
-| AddressBookServiceTest | 7 | ✅ | Whitelist-Management |
-| InstitutionalAddressBookServiceTest | 6 | ✅ | Bank-weite Whitelist |
-| B2cYieldServiceTest | 5 | ✅ | Yield-Sparkonto |
-| **MultiTenancyIntegrationTest** | **5** | **✅ NEU** | RLS-Isolation |
-| ComplianceServiceTest | 5 | ✅ | AML (inkl. direction-Parameter) |
-| B2bTransferIntegrationTest | 4 | ✅ | Transfer-Flow |
-| B2bResilienceTest | 4 | ✅ | Circuit Breaker + Idempotenz |
-| CommonControllerOwnershipTest | 2 | ✅ | Ownership-403 |
-| **InboundProcessingTest** | **2** | **✅ NEU** | Webhook-Verarbeitung |
-| **Gesamt** | **106** | **✅** | |
-
-**Coverage (Baseline 2026-08-17 + neue Klassen):**
-
-| Metrik | Baseline (2026-08-17) | Heute (Schätzung) |
-|---|---|---|
-| LINE | 62,7% | ~65% (+InboundProcessingService) |
-| BRANCH | 48,4% | ~50% |
-| CLASS | 86,7% | ~88% |
-
-> Exakte Zahlen: `mvn verify -Pcoverage` (Jacoco-Report in `target/site/jacoco/`)
-
----
-
-### 5.2 Sicherheitsvalidierung — RLS-Isolation
-
-**TC: Mandant B kann Mandant A's Account NICHT einsehen**
-```
-Tenant A:  JWT{sub="test-a-XXX", tenant="tenant-kleine-vb"}
-Tenant B:  JWT{sub="test-b-XXX", tenant="tenant-grosse-vb"}
-
-Tenant A erstellt Transfer → TX mit tenant_id='tenant-kleine-vb'
-Tenant B fragt GET /api/v1/b2b/transfers → HTTP 200, content=[]  (leer)
-Tenant B fragt TX per ID → HTTP 4xx/5xx (RLS filtert + Ownership-Check)
-```
-
-**DB-Beweis der Isolation:**
-```sql
--- Als stablecoin_app mit app.current_tenant = 'tenant-grosse-vb':
-SELECT COUNT(*) FROM stablecoin_transaction
-WHERE customer_account_id = '<accountA_id>';
--- → 0 (RLS filtert alle Tenant-A Transaktionen aus)
-```
-
----
-
-### 5.3 AML-Block-Validierung (Inbound HIGH_RISK)
-
-**Test-Adresse:** `0xDEAD000000000000000000000000000000000000` (Chainalysis-Mock → HIGH_RISK)
-
-**Verhalten:**
-1. TX wird als `INCOMING` persistiert (Blockchain-Nachweis)
-2. AML-Screen → BLOCKED
-3. AuditLog INSERT: `action='AML_INBOUND_BLOCK'` (BaFin-pflichtiger Revisionsnachweis)
-4. TX → `COMPLIANCE_REJECTED` → `FAILED`
-5. **Keine** `CoreBankingClient.createLedgerBooking()` Ausführung
-6. **Keine** EUR-Gutschrift auf Kundenkonto
-
----
-
-### 5.4 Resilience — Crash-Recovery
-
-**Szenario:** System crasht nach `INCOMING` (vor Compliance-Screen)
-
-**Recovery:**
-1. Backend-Neustart
-2. `OutboxProcessor.processPendingMessages()` (alle 5s)
-3. Event-Typ `PROCESS_INBOUND_COMPLIANCE` erkannt
-4. TX-Status `INCOMING` → Compliance-Flow erneut starten
-5. Bei SETTLED/FAILED/terminal → OutboxMsg als `SENT` markiert
-
-**Idempotenz:** Compliance-Flow kann mehrfach für dieselbe TX aufgerufen werden. Status `COMPLIANCE_PENDING` schützt gegen Double-Processing (transitionTo würde `IllegalStateException` werfen).
-
----
-
-### 5.5 Bekannte Einschränkungen (offene Punkte)
-
-| # | Bereich | Beschreibung | Priorität |
-|---|---|---|---|
-| 1 | Webhook-Security | Keine HMAC-Signaturprüfung (`X-Circle-Signature`) — Prod: HMAC-Validierung implementieren | 🔴 Hoch |
-| 2 | Rate Limiting | Webhook-Endpunkt ohne Rate-Limit — DoS möglich | 🔴 Hoch |
-| 3 | Inbound SETTLED | `settledAt`-Timestamp wird nicht gesetzt (Outbound: korrekt gesetzt) | 🟡 Mittel |
-| 4 | RLS (approval_workflow, outbox) | Tabellen ohne `tenant_id` — institutionell akzeptabel, da bank-intern | 🔵 Niedrig |
-| 5 | Test-Coverage | `controller/b2b` (14 Endpunkte) nicht via MockMvc gedeckt | 🔴 Hoch |
-| 6 | B2b-Empfang | Kein UI-Widget für Inbound-Transaktionen in TransferListComponent | 🟡 Mittel |
-
----
-
-## 6. Neue Entitäten & Klassen (Vollständige Liste)
-
-### Backend — Neue Klassen (2026-08-18)
-
-| Klasse | Paket | Zweck |
-|---|---|---|
-| `TenantContext` | `config` | ThreadLocal-Tenant-Träger |
-| `TenantAwareDataSource` | `config` | DataSource-Proxy: set_config bei getConnection() |
-| `TenantDataSourceConfig` | `config` | Spring-Bean: Primary DataSource + adminDataSource |
-| `TenantEntityListener` | `config` | JPA @PrePersist: tenant_id auto-setzen |
-| `TenantAspect` | `config` | Guard-Layer: loggt fehlenden TenantContext |
-| `Tenant` | `entity` | JPA-Entity für `tenant`-Tabelle |
-| `TenantRepository` | `repository` | CRUD für `tenant` |
-| `DevAuthController` | `controller` | Dev-Token-Endpoint (devMode only) |
-| `InboundWebhookRequest` | `dto/request` | Webhook-Payload-Record |
-| `InboundWebhookController` | `controller` | POST /webhook |
-| `InboundProcessingService` | `service/inbound` | Inbound-Flow-Orchestrierung |
-
-### Backend — Modifizierte Klassen (2026-08-18)
-
-| Klasse | Änderung |
+| Vorher | Nachher |
 |---|---|
-| `JwtAuthFilter` | Extrahiert `tenant`-Claim, setzt TenantContext |
-| `SecurityConfig` | permitAll für `/auth/dev-token` + `/inbound/webhook` |
-| `TransactionStatus` | +4 Inbound-Werte (INCOMING, COMPLIANCE_PENDING, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED) |
-| `B2bTransferService` | ALLOWED_TRANSITIONS: +5 Inbound-Einträge |
-| `ComplianceService` | `direction`-Parameter (Breaking Change für 1 Aufrufer) |
-| `OutboxProcessor` | +`PROCESS_INBOUND_COMPLIANCE` Recovery-Handler |
-| 5 Entities | `@EntityListeners` + `tenantId`-Feld (CustomerAccount, StablecoinTransaction, AddressBook, YieldPosition, AuditLog) |
-| `CustomerAccountRepository` | +`findByWalletAddress()` |
-| `StablecoinTransactionRepository` | +`findByBlockchainHash()` |
+| Hold = `amountFiat` | Hold = `grossDebit` (+ Fee + Spread) |
+| Recipient erhält weniger als Sender sendet | Recipient erhält vollen `amountFiat`, Bank bucht Fee+Spread |
+| Kein Storno bei Circle-Failure nach Ledger | `reverseBooking()` bei `ledger_booking_reference != null` |
 
-### Frontend — Modifizierte Dateien (2026-08-18)
-
-| Datei | Änderung |
-|---|---|
-| `login.component.ts` | Tenant-Dropdown (3 Volksbanken) + API-Call für JWT |
+**Neue Spalten (V11):** `gross_debit`, `fee_amount`, `ledger_booking_reference`, `slippage_tolerance_bps`, `tax_withheld`
 
 ---
 
-## 7. Review-Checkliste
+### G-02 · Kapitalertragsteuer — Drittsystem (EStG §43/§44) — KRITISCH
 
-Für das Code-Review bitte folgende Punkte prüfen:
-
-- [ ] **RLS-Policies:** Stimmen `USING`-Klauseln auf allen 5 Tabellen?
-- [ ] **TenantContext.clear()** — wird in allen Request-Pfaden (auch Error-Pfaden) aufgerufen?
-- [ ] **Webhook permitAll** — ist die URL-Pattern exakt genug um kein Over-Permitting zu erzeugen?
-- [ ] **adminJdbcTemplate** — werden alle Queries sicher parameterisiert (kein SQL-Injection)?
-- [ ] **Inbound FX** — USDC×ECB ohne Spread korrekt? (Inbound ist gebührenfrei by Design)
-- [ ] **AML_INBOUND_BLOCK** — wird AuditLog wirklich VOR den State-Machine-Transitionen committed?
-- [ ] **PROCESS_INBOUND_COMPLIANCE** — OutboxProcessor: wird TenantContext korrekt gesetzt und cleared?
-- [ ] **Idempotenz** — blockchainHash als UNIQUE-Idempotenz-Schlüssel ausreichend?
-- [ ] **B2bStateMachineTest** — decken die 27 TCs auch die neuen Inbound-Übergänge ab?
+- `AtruviaTaxClient` Interface → Atruvia Tax Engine (Drittsystem)
+- `MockAtruviaTaxClient`: FSA 1.000 EUR/Jahr, `FSA_COVERED`/`PARTIAL_FSA`/`TAX_APPLIED`
+- `B2cYieldService.redeem()`: Netto-Buchung + `TaxEvent` Audit-Nachweis (V13)
+- Kein eigenes FSA/KiSt-Management in dieser Plattform
 
 ---
 
-*Generiert: 2026-08-18 | Atruvia AG — Stablecoin Integration Platform*
+### G-03 · Mandantenspezifische Konfiguration — KRITISCH
+
+- `TenantSettings` Entity (V12): FX-Spread, Fees, Limits, Travel-Rule, Bulk-Quote, Kill-Switch
+- Seed-Daten für alle 4 Dev-Tenants
+- `B2bTransferService`: alle preisrelevanten Parameter aus TenantSettings
+
+---
+
+### G-04 · Reconciliation (AT 7.2 MaRisk) — KRITISCH
+
+- `ReconciliationService` @Scheduled(23:00), pro Tenant
+- `ReconciliationRun` Entity (V14)
+- Status: BALANCED | DISCREPANCY (>1 Cent) | ERROR
+
+---
+
+### G-05 · HedgeClient-Interface (MiCA Art. 45) — MITTEL
+
+- `HedgeClient` Interface + `MockHedgeClient`
+- Stub für DZ-BANK-Treasury-Anbindung (prod: `HttpDzBankHedgeClient` nicht implementiert)
+
+---
+
+### G-06 · Slippage-Schutz (MiCA Art. 23) — MITTEL
+
+- `SlippageExceededException` → HTTP 422 BIZ_005
+- 100 BPS Default aus TenantSettings
+
+---
+
+### G-07 · Kill Switch (DORA Art. 17, §25a KWG) — KRITISCH
+
+- `KillSwitchFilter` → blockiert alle schreibenden Requests
+- Global (`system_control`) + Mandanten-Ebene (`tenant_settings.kill_switch_active`)
+- HTTP 503 SYSTEM_003
+
+---
+
+### G-08 · LimitResolver (§3 GwG) — MITTEL
+
+- `LimitResolver`: CustomerOverride ≤ TenantMax ≥ TenantDefault
+- `limit_change_log` Tabelle (V16)
+
+---
+
+### G-09 · Idempotenz-TTL (PSD2) — LOW
+
+- `idempotency_expires_at` (V16), 30-Tage-Default
+- `IdempotencyCleanupService` @Scheduled(02:03)
+
+---
+
+### G-10 · CAMT.029 Rejection — MITTEL
+
+- `ExportService.generateCamt029()` — ISO 20022 CAMT.029.001.09
+- `GET /api/v1/b2b/export/camt029?since=...`
+
+---
+
+### G-11 · Outbox-Monitor (§25a KWG) — KRITISCH
+
+- `OutboxMonitorService` @Scheduled alle 5 Min
+- `N8nWebhookClient.notifyOutboxAlert()` bei PENDING > 15 Min
+
+---
+
+### G-12 · Travel Rule (FATF Rec. 16) — MITTEL
+
+- `beneficiaryName/Address/AccountId` Pflichtfelder bei Transfers > `travel_rule_threshold_eur` (V17)
+- `tenant_settings.travel_rule_enabled` (Default: false)
+
+---
+
+### G-13 · Bulk-Erfolgsquote — MITTEL
+
+- `bulk_min_success_rate` in TenantSettings (V16)
+- `BulkPaymentThresholdException` → HTTP 422 BIZ_006
+
+---
+
+### G-14 · Telefonnummer-Hash (DSGVO Art. 32) — KRITISCH
+
+- `PhoneHashService` HMAC-SHA256 mit `PHONE_HMAC_KEY` Env-Var
+- `phone_alias.phone_hash_algorithm` (V16)
+- **Prod-Aktion erforderlich:** `PHONE_HMAC_KEY` setzen!
+
+---
+
+### G-15 · Jahresabschluss Yield (EStG §11, HGB §252) — MITTEL
+
+- `YieldYearEndService` @Scheduled(31.12. 23:30)
+- `yield_position.year_end_valuation_eur/last_valued_year` (V18)
+- AtruviaTaxClient-Delegation
+
+---
+
+## 5. Flyway-Migrationen Gesamt (V1–V18)
+
+| V | Datei | Inhalt |
+|---|---|---|
+| V1 | `init.sql` | Alle 8 Basistabellen + Seed-Konten |
+| V2 | `fix_b2b_approval_threshold.sql` | tx_limit_single → 25.000 EUR |
+| V3 | `add_institutional_address_book.sql` | Institutionelle Whitelist |
+| V4 | `add_hold_id_to_transaction.sql` | hold_id Spalte |
+| V5 | `update_transaction_status_enum.sql` | Status-Enum erweitert |
+| V6 | `add_yield_position.sql` | Yield-Sparkonto-Tabelle |
+| V7 | `refactor_audit_log.sql` | AuditLog fromStatus/toStatus als Enum-Spalten |
+| V8 | `enable_row_level_security.sql` | RLS-Policies + stablecoin_app-Grants + tenant-Tabelle |
+| V9 | `add_inbound_status_values.sql` | INCOMING/COMPLIANCE_PENDING/APPROVED/REJECTED |
+| V10 | `enterprise_payment_features.sql` | parent_tx_id, INBOUND_RETURN, UNASSIGNED, RETURNED, Sammelkonto |
+| V11 | `buchungskreislauf_spalten.sql` | gross_debit, fee_amount, ledger_booking_reference, tax_withheld |
+| V12 | `tenant_settings_und_kill_switch.sql` | tenant_settings + system_control |
+| V13 | `tax_event.sql` | tax_event (Drittsystem-Audit-Nachweis) |
+| V14 | `reconciliation_run.sql` | Tagesabschluss-Tabelle |
+| V15 | `grant_system_control_to_app_user.sql` | GRANTs für neue Tabellen → stablecoin_app |
+| V16 | `operational_gaps.sql` | phone_hash_algorithm, limit_change_log, bulk_min_success_rate, idempotency_expires_at |
+| V17 | `travel_rule.sql` | beneficiary_* Spalten, travel_rule_enabled in tenant_settings |
+| V18 | `yield_year_end.sql` | year_end_valuation, redeem_tx_id nullable |
+
+---
+
+## 6. Neue Fehler-Codes
+
+| Code | HTTP | Exception | Auslöser |
+|---|---|---|---|
+| AUTH_002 | 401 | `WebhookSignatureException` | Ungültige/fehlende Webhook-Signatur |
+| BIZ_005 | 422 | `SlippageExceededException` | Kursabweichung > Slippage-Limit |
+| BIZ_006 | 422 | `BulkPaymentThresholdException` | Bulk-Erfolgsquote < Mindest |
+| SYSTEM_003 | 503 | `PaymentSystemFrozenException` | Kill Switch aktiv |
+| FATF_001 | 400 | `IllegalArgumentException` | Travel Rule Pflichtfelder fehlen |
+
+---
+
+## 7. Test-Coverage (125 Tests, 0 Failures)
+
+| Klasse | Art | TCs |
+|---|---|---|
+| `WebhookSecurityTest` | Unit | 5 |
+| `OutboxProcessorTest` | Unit | 13 |
+| `TenantSettingsTest` | Unit | 3 |
+| `MockAtruviaTaxClientTest` | Unit | 3 |
+| `B2cYieldServiceTest` | Unit | 4 |
+| `B2bStateMachineTest` | Unit | 14 |
+| `ComplianceServiceTest` | Unit | 5 |
+| `AddressBookServiceTest` | Unit | 7 |
+| `InboundProcessingTest` | Integration | 2 |
+| `EnterprisePaymentFeaturesTest` | Integration | 5 |
+| `MultiTenancyIntegrationTest` | Integration | 5 |
+| `B2bTransferIntegrationTest` | Integration | 4 |
+| `B2bResilienceTest` | Integration | 4 |
+| Weitere Unit-Tests | Unit | 51 |
+
+---
+
+## 8. Prod-Deployment-Checkliste
+
+- [ ] `CIRCLE_WEBHOOK_SECRET` Env-Variable setzen (Webhook-Signaturvalidierung)
+- [ ] `PHONE_HMAC_KEY` Env-Variable setzen (min. 32 Zufallsbytes hex-kodiert)
+- [ ] PostgreSQL `max_connections` ≥ 200 (aktuell: 200, war 100)
+- [ ] `tenant_settings` für alle Produktiv-Tenants befüllen
+- [ ] `system_control` GLOBAL-Eintrag vorhanden (`INSERT INTO system_control(scope) VALUES('GLOBAL')`)
+- [ ] `stablecoin_app` User BYPASSRLS: **nein** (korrekt — RLS bleibt aktiv)
+- [ ] `stablecoin` User BYPASSRLS: **ja** (korrekt für Flyway + adminJdbcTemplate)
+- [ ] n8n-Webhook-URL konfiguriert für Outbox-Monitor-Alerts
+
+---
+
+*Generiert: 2026-08-18 | Version: Sprint-Abschluss | Tests: 125 | 0 Failures*

@@ -1,8 +1,8 @@
 # Use Cases — Atruvia Stablecoin Integration Platform · Version 3
 
-> Stand: 2026-08-18 | Commits: `68bb995` (Multi-Tenancy RLS) → `a607b2e` (Inbound Processing)  
-> Vollständige, aktuelle Dokumentation aller 28 Use Cases.  
-> Alle Änderungen aus Session 1–3 sind eingearbeitet.
+> **Stand: 2026-08-18 (Sprint-Abschluss)** | Commits: `68bb995` → `f31336e` (8 Commits)  
+> Vollständige Dokumentation aller **34 Use Cases** (UC-01–UC-31 + G-01–G-15 Gap-Fixes).  
+> Alle Änderungen aus Session 1–7 sind eingearbeitet.
 
 ---
 
@@ -1009,53 +1009,141 @@ In Kasm-Umgebung ohne Docker: automatisch geskippt (kein Fehler).
 
 ---
 
-## State Machine — Transaktionslebenszyklus
+## UC-29 · CAMT.054 Echtzeit-Avisierung
 
-### Erlaubte Zustandsübergänge (11-Werte-Enum)
+**Akteur:** ERP-System (SAP) des Firmenkunden  
+**Endpunkt:** `GET /api/v1/b2b/export/camt054?iban=...`  
+**Format:** ISO 20022 CAMT.054.001.08 (Bank-to-Customer Debit Credit Notification)  
+**Filter:** `type=INBOUND`, `status=SETTLED`  
+**BkTxCd:** PMNT/RCDT/ESCT (Received Credit Transfer)  
+**Testfall:** `EnterprisePaymentFeaturesTest.camt054_settledInboundTxs_generatesValidXmlWithCrdtEntries`
+
+---
+
+## UC-30 · Automatische Retouren (Inbound R-Transaktionen)
+
+**Trigger:** `status=SUSPENDED` oder `status=BLOCKED` des Empfängerkontos nach AML-Screening
+
+**Flow:**
+```
+Webhook → INCOMING → COMPLIANCE_PENDING → AML OK
+                                         → Konto-Status SUSPENDED/BLOCKED?
+                                              JA: Original-TX → FAILED (KONTO_INAKTIV)
+                                                  INBOUND_RETURN-TX → CREATED → RETURNED
+                                              NEIN: weiter normal → SETTLED
+```
+
+**Neue Felder:**
+- `stablecoin_transaction.parent_transaction_id` — Verknüpfung Retoure ↔ Original (V10)
+- `TransactionType.INBOUND_RETURN`
+- `TransactionStatus.RETURNED` (terminal)
+
+**Wichtige Impl.-Details:**
+- `initiateInboundReturn()` ist `@Transactional(REQUIRES_NEW)` → T3
+- Inner `transitionToFailed(originalTxId)` startet T4 (REQUIRES_NEW) — **findet TX, da T2 committed hat**
+- `returnTx.setStatus(RETURNED)` direkt in T3 (nicht via `transferService.transitionTo()` — würde T4' benötigen, die T3-Daten nicht sieht)
+- `circleWalletClient.initiateTransfer()` → Circle-Rücküberweisung an `senderWallet`
+
+**Testfall:** `EnterprisePaymentFeaturesTest.inboundReturn_suspendedAccount_createsReturnTransaction`
+
+---
+
+## UC-31 · Sammelkonto-Prinzip (Unzuordenbare Geldeingänge)
+
+**Trigger:** Webhook mit Wallet-Adresse, die keinem `customer_account` zugeordnet ist
+
+**Flow:**
+```
+Webhook → adminJdbcTemplate(BYPASSRLS): wallet → null (keine Match)
+        → processUnassignedInbound()
+        → TX auf Sammelkonto (customer_id='unassigned-funds', tenant_id='tenant-default')
+        → status=UNASSIGNED
+
+Später: Admin prüft manuell
+        → POST /api/v1/b2b/admin/reassign-transaction {transactionId, targetIban}
+        → ReassignTransactionService: UPDATE stablecoin_transaction (cross-tenant via adminJdbc)
+        → CoreBanking.createLedgerBooking() → Gutschrift auf Zielkonto
+        → status=SETTLED
+```
+
+**Neue Felder:** `TransactionStatus.UNASSIGNED`, V10-Seed: Sammelkonto
+
+**Testfälle:** `EnterprisePaymentFeaturesTest.unassignedInbound_unknownWallet_parkedOnCollectionAccount` + `reassignTransaction_unassignedTx_settlesOnTargetAccount`
+
+---
+
+## State Machine — Transaktionslebenszyklus (aktualisiert V10)
+
+### Erlaubte Zustandsübergänge (18-Werte-Enum)
 
 ```
-CREATED           → PENDING_APPROVAL, COMPLIANCE_CHECKED, FAILED
+── Outbound-Pfad ────────────────────────────────────────────
+CREATED           → PENDING_APPROVAL, COMPLIANCE_CHECKED, INCOMING, FAILED, RETURNED
 PENDING_APPROVAL  → APPROVED, REJECTED, EXPIRED, FAILED
 APPROVED          → COMPLIANCE_CHECKED, FAILED
 COMPLIANCE_CHECKED→ FUNDS_HELD, FAILED
-FUNDS_HELD        → SUBMITTED, FAILED  ← FAILED hier: Auto-Hold-Release!
-SUBMITTED         → SETTLED, FAILED    ← FAILED hier: Auto-Hold-Release!
+FUNDS_HELD        → SUBMITTED, FAILED  ← FAILED: Auto-Hold-Release + Storno-Buchung (G-01)
+SUBMITTED         → SETTLED, FAILED    ← FAILED: Auto-Hold-Release + Storno-Buchung (G-01)
 SETTLED           → REDEEMED, FAILED
 
-REDEEMED, REJECTED, EXPIRED, FAILED  →  (terminal — keine weiteren Übergänge)
+── Inbound-Pfad ─────────────────────────────────────────────
+INCOMING          → COMPLIANCE_PENDING, FAILED
+COMPLIANCE_PENDING→ COMPLIANCE_APPROVED, COMPLIANCE_REJECTED, FAILED
+COMPLIANCE_APPROVED→SETTLED, FAILED
+
+── Enterprise (V10) ─────────────────────────────────────────
+UNASSIGNED        → SETTLED, FAILED         (nach Admin-Reassign)
+
+── Terminal (keine weiteren Übergänge) ──────────────────────
+REDEEMED, REJECTED, EXPIRED, FAILED, COMPLIANCE_REJECTED, RETURNED
 ```
 
-### Status-Semantik
+### Status-Semantik (vollständig, 18 Werte)
 
-| Status | Bedeutung | Terminal | Hold-Release bei FAILED |
+| Status | Pfad | Bedeutung | Terminal |
 |---|---|---|---|
-| `CREATED` | Transaktion initialisiert | Nein | Nein |
-| `PENDING_APPROVAL` | Wartet auf Vier-Augen-Freigabe | Nein | Nein |
-| `APPROVED` | Zweitfreigabe erteilt | Nein | Nein |
-| `REJECTED` | Zweitfreigabe abgelehnt | **Ja** | — |
-| `EXPIRED` | Freigabefrist abgelaufen | **Ja** | — |
-| `COMPLIANCE_CHECKED` | AML/Whitelist erfolgreich | Nein | Nein |
-| `FUNDS_HELD` | EUR-Betrag im Kernbanksystem gesperrt | Nein | **Ja** |
-| `SUBMITTED` | An Taurus/Circle/Blockchain übergeben | Nein | **Ja** |
-| `SETTLED` | Erfolgreich abgeschlossen und verbucht | Nein* | — |
-| `REDEEMED` | Yield-Anlage erfolgreich aufgelöst | **Ja** | — |
-| `FAILED` | Technischer/fachlicher Abbruch mit Rollback | **Ja** | — |
+| `CREATED` | Out/In | Transaktion initialisiert | Nein |
+| `PENDING_APPROVAL` | Out | Vier-Augen-Freigabe ausstehend | Nein |
+| `APPROVED` | Out | Zweitfreigabe erteilt | Nein |
+| `REJECTED` | Out | Zweitfreigabe abgelehnt | **Ja** |
+| `EXPIRED` | Out | Freigabefrist abgelaufen | **Ja** |
+| `COMPLIANCE_CHECKED` | Out | AML/Whitelist erfolgreich | Nein |
+| `FUNDS_HELD` | Out | EUR im CoreBanking gesperrt; G-01: Storno bei FAILED | Nein |
+| `SUBMITTED` | Out | An Circle/Blockchain übergeben; G-01: Storno bei FAILED | Nein |
+| `SETTLED` | Out/In | Erfolgreich verbucht | Nein* |
+| `REDEEMED` | Yield | Yield-Anlage aufgelöst | **Ja** |
+| `FAILED` | Out/In | Technischer/fachlicher Abbruch | **Ja** |
+| `INCOMING` | In | Blockchain-Eingang registriert | Nein |
+| `COMPLIANCE_PENDING` | In | Post-Receive AML läuft | Nein |
+| `COMPLIANCE_APPROVED` | In | AML erfolgreich → Gutschrift folgt | Nein |
+| `COMPLIANCE_REJECTED` | In | AML-Verdacht, Gelder blockiert | **Ja** |
+| `UNASSIGNED` | In | Wallet unbekannt → Sammelkonto (UC-31) | Nein** |
+| `RETURNED` | In | Inbound-Retoure abgeschlossen (UC-30) | **Ja** |
 
-*SETTLED → REDEEMED erlaubt (Yield-Redeem-Pfad)
+\* SETTLED → REDEEMED erlaubt (Yield-Redeem-Pfad)  
+\** UNASSIGNED → SETTLED nach Admin-Reassign (UC-31)
 
-### Implementierung
+### State Machine Implementierung
 
 ```java
-// Zentrale State-Machine-Methode (B2bTransferService)
+// B2bTransferService.java — ALLOWED-Map (aktueller Stand V10)
 private static final Map<TransactionStatus, EnumSet<TransactionStatus>> ALLOWED =
     Map.ofEntries(
-        entry(CREATED,            EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, FAILED)),
+        // Outbound
+        entry(CREATED,            EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, INCOMING, FAILED, RETURNED)),
         entry(PENDING_APPROVAL,   EnumSet.of(APPROVED, REJECTED, EXPIRED, FAILED)),
         entry(APPROVED,           EnumSet.of(COMPLIANCE_CHECKED, FAILED)),
         entry(COMPLIANCE_CHECKED, EnumSet.of(FUNDS_HELD, FAILED)),
         entry(FUNDS_HELD,         EnumSet.of(SUBMITTED, FAILED)),
         entry(SUBMITTED,          EnumSet.of(SETTLED, FAILED)),
-        entry(SETTLED,            EnumSet.of(REDEEMED, FAILED))
+        entry(SETTLED,            EnumSet.of(REDEEMED, FAILED)),
+        // Inbound
+        entry(INCOMING,           EnumSet.of(COMPLIANCE_PENDING, FAILED)),
+        entry(COMPLIANCE_PENDING, EnumSet.of(COMPLIANCE_APPROVED, COMPLIANCE_REJECTED, FAILED)),
+        entry(COMPLIANCE_APPROVED,EnumSet.of(SETTLED, FAILED)),
+        entry(COMPLIANCE_REJECTED,EnumSet.of(FAILED)),
+        // Enterprise
+        entry(UNASSIGNED,         EnumSet.of(SETTLED, FAILED))
     );
 
 @Transactional(propagation = Propagation.REQUIRES_NEW)

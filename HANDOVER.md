@@ -1,7 +1,13 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-18** | GitHub: https://github.com/potty32/stablecoin-integration
-> Commits heute (2026-08-18): `68bb995` (Multi-Tenancy RLS) → `a607b2e` (Inbound Processing) → `1cd16f5` (Security: Webhook-Signatur + OutboxProcessor RLS-Fix + settledAt)
+> Letzte Aktualisierung: **2026-08-18** (Sprint-Abschluss) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commits 2026-08-18 (8 Commits):**
+> `68bb995` RLS → `a607b2e` Inbound → `1f06eba` Konsolidierung →
+> `1cd16f5` Security (Webhook-Signatur, OutboxProcessor RLS-Fix) →
+> `87989d9` Enterprise (UC-29/30/31) →
+> `a3292e8` BaFin G-01–G-07 (Buchungskreislauf, Tax, TenantSettings, KillSwitch) →
+> `f31336e` BaFin G-08–G-15 (Operative + Compliance Gaps)
+> **Tests:** 125 | 0 Failures | **Flyway:** V1–V18
 > Commits gestern (2026-08-17): `653ade6` → `517fa52` → `9ec182d` → `b8193eb` → `26d0dad` → `7eff98d` → `6431644` → `a7fc187` → `19e41ba` → `1715a55`
 
 ---
@@ -409,7 +415,16 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 | V6 | `V6__add_yield_position.sql` | `yield_position` Tabelle + YIELD_REDEEM im type-Constraint |
 | V7 | `V7__refactor_audit_log.sql` | AuditLog: 4 neue Spalten (transactionId, fromStatus, toStatus, details), 4 alte entfernt |
 | V8 | `V8__enable_row_level_security.sql` | **🆕** tenant-Tabelle (4 Dev-Mandanten) + tenant_id auf 5 Tabellen + RLS-Policies |
-| V9 | `V9__add_inbound_status_values.sql` | **🆕** CHECK-Constraint: 11 → 15 Status-Werte (INCOMING, COMPLIANCE_PENDING, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED) |
+| V9 | `V9__add_inbound_status_values.sql` | CHECK-Constraint: 11 → 15 Status-Werte (INCOMING, COMPLIANCE_PENDING, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED) |
+| V10 | `V10__enterprise_payment_features.sql` | **🆕** `parent_transaction_id`, INBOUND_RETURN/RETURNED/UNASSIGNED, Sammelkonto-Seed |
+| V11 | `V11__buchungskreislauf_spalten.sql` | **🆕** `gross_debit`, `fee_amount`, `ledger_booking_reference`, `slippage_tolerance_bps`, `tax_withheld` |
+| V12 | `V12__tenant_settings_und_kill_switch.sql` | **🆕** `tenant_settings` (Preise, Limits, Kill-Switch) + `system_control` + Seed für 4 Tenants |
+| V13 | `V13__tax_event.sql` | **🆕** `tax_event` (Audit-Nachweis für AtruviaTaxClient-Meldungen) |
+| V14 | `V14__reconciliation_run.sql` | **🆕** `reconciliation_run` (EOD Soll/Haben-Abgleich) |
+| V15 | `V15__grant_system_control_to_app_user.sql` | **🆕** GRANT SELECT/INSERT/UPDATE auf neue Tabellen für `stablecoin_app` |
+| V16 | `V16__operational_gaps.sql` | **🆕** `phone_hash_algorithm`, `limit_change_log`, `bulk_min_success_rate`, `idempotency_expires_at` |
+| V17 | `V17__travel_rule.sql` | **🆕** `beneficiary_*` Felder, `travel_rule_enabled/threshold` in `tenant_settings` |
+| V18 | `V18__yield_year_end.sql` | **🆕** `year_end_valuation_eur/tax_event_id/last_valued_year` auf `yield_position`; `tax_event.redeem_tx_id` nullable |
 
 ---
 
@@ -430,38 +445,56 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 - Ausfallsicherheit (Idempotenz atomar, SUBMIT_TO_BLOCKCHAIN Outbox, CB+Retry)
 - Testabdeckung 13% → 62,7% (99 Tests)
 
-### ✅ Abgeschlossen 2026-08-18 (heute)
-- **Multi-Tenancy via PostgreSQL RLS** (commit `68bb995`)
-  - V8 Migration: `tenant`-Tabelle + `tenant_id` auf 5 Tabellen + RLS-Policies
-  - `TenantAwareDataSource`: `set_config` per Connection-Acquire
-  - JWT `tenant`-Claim → `TenantContext` → DB-Isolation
-  - `TenantEntityListener`: `@PrePersist` setzt `tenant_id` automatisch
-  - `DevAuthController`: Dev-Token mit Tenant-Claim
-  - Angular Login: Mandanten-Dropdown (3 Volksbanken)
-  - `MultiTenancyIntegrationTest`: 5 TCs — RLS-Isolation bewiesen
-- **Inbound Stablecoin Processing** (commit `a607b2e`)
-  - `POST /api/v1/b2b/inbound/webhook` — Circle/Taurus-Webhook-Endpunkt
-  - V9 Migration: 4 neue Status-Werte (INCOMING, COMPLIANCE_PENDING, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED)
-  - Post-Receive AML-Screening mit `direction="incoming"`
-  - FX-Konvertierung: USDC×ECB-Rate (kein Spread), EURC 1:1
-  - Crash-Recovery via OutboxProcessor (`PROCESS_INBOUND_COMPLIANCE`)
-  - `InboundProcessingTest`: 2 TCs — LOW_RISK→SETTLED + HIGH_RISK→FAILED+AML_BLOCK
-- **106 Tests gesamt — alle grün**
-- QA_REVIEW_CHANGES.md erstellt (vollständiger Sprint-Bericht)
+### ✅ Abgeschlossen 2026-08-18 (Sprint-Abschluss — 7 Commits)
 
-### Testabdeckung
+**Multi-Tenancy & Inbound Processing** (commits `68bb995`, `a607b2e`, `1f06eba`):
+- V8: RLS-Policies + 4 Dev-Tenants + `TenantAwareDataSource` + JWT-Claim
+- V9: Inbound-Status-Werte + `POST /api/v1/b2b/inbound/webhook`
+- AML-Screening (direction="incoming"), FX-Konvertierung, Crash-Recovery
 
-| Priorität | Maßnahme | Gewinn |
+**Sicherheitsschicht** (commit `1cd16f5`):
+- ✅ Webhook-HMAC-Signaturprüfung (`X-Circle-Signature`, HTTP 401 AUTH_002)
+- ✅ OutboxProcessor RLS-Fix (adminJdbcTemplate für Tenant-Lookup vor TenantContext.set())
+- ✅ `settledAt`-Timestamp in InboundProcessingService
+
+**Enterprise Payment Features** (commit `87989d9`, V10):
+- ✅ UC-29: `GET /api/v1/b2b/export/camt054` — CAMT.054.001.08 Echtzeit-Avisierung
+- ✅ UC-30: Automatische Retouren bei SUSPENDED/BLOCKED Konto → `INBOUND_RETURN` TX
+- ✅ UC-31: Sammelkonto (`unassigned-funds`) + Admin-Reassign-Endpunkt
+
+**BaFin Gaps G-01 bis G-07** (commit `a3292e8`, V11–V15):
+- ✅ G-01: Gross-Debit-Modell + Storno-Buchung bei FAILED
+- ✅ G-02: AtruviaTaxClient Drittsystem-Integration + TaxEvent
+- ✅ G-03: TenantSettings — mandantenspezifische Preise/Limits
+- ✅ G-04: ReconciliationService EOD @Scheduled(23:00)
+- ✅ G-05: HedgeClient Interface + MockHedgeClient
+- ✅ G-06: SlippageExceededException + Slippage-Check (100 BPS Default)
+- ✅ G-07: KillSwitchFilter + SystemControl + Admin-Endpoints
+
+**BaFin Gaps G-08 bis G-15** (commit `f31336e`, V16–V18):
+- ✅ G-08: LimitResolver + limit_change_log Audit-Trail
+- ✅ G-09: Idempotenz-Key TTL (30 Tage) + IdempotencyCleanupService
+- ✅ G-10: CAMT.029 Rejection-Benachrichtigung
+- ✅ G-11: OutboxMonitorService @Scheduled + n8n-Alert
+- ✅ G-12: Travel Rule (FATF Rec. 16) Pflichtfelder
+- ✅ G-13: Bulk-Payment Mindest-Erfolgsquote (BulkPaymentThresholdException)
+- ✅ G-14: PhoneHashService HMAC-SHA256 (PHONE_HMAC_KEY Env-Variable)
+- ✅ G-15: YieldYearEndService @Scheduled(31.12. 23:30)
+
+**125 Tests — 0 Failures | Flyway V1–V18 | QA_REVIEW_CHANGES.md vollständig**
+
+### Offene Punkte (verbleibend)
+
+| Priorität | Beschreibung | Kategorie |
 |---|---|---|
-| 🔴 Hoch | `controller/b2b` via MockMvc — 14 Endpunkte testen | +15–20pp LINE |
-| 🔴 Hoch | `service/b2c` Unit-Tests — P2P, Remittance, Micropayment | +10–15pp LINE |
-| 🔴 Hoch | Webhook-HMAC-Signaturprüfung (`X-Circle-Signature`) implementieren | Security |
-| 🔴 Hoch | Rate-Limiting für `/api/v1/b2b/inbound/webhook` (DoS-Schutz) | Security |
-| 🟡 Mittel | `settledAt`-Timestamp in InboundProcessingService setzen | Datenqualität |
-| 🟡 Mittel | Frontend-Widget für Inbound-Transaktionen in TransferListComponent | UX |
-| 🟡 Mittel | `client/http` Contract-Tests (WireMock) | +8pp LINE |
-
-**Ziel: ≥80% LINE, ≥70% BRANCH** (BaFin/IT-Audit-Anforderung)
+| 🔴 Hoch | `PHONE_HMAC_KEY` in Prod-Deployment setzen (kein Default-Fallback in Prod) | Security |
+| 🔴 Hoch | `CIRCLE_WEBHOOK_SECRET` in Prod setzen | Security |
+| 🔴 Hoch | Rate-Limiting für Webhook-Endpunkt (DoS-Schutz) | Security |
+| 🟡 Mittel | `HttpDzBankHedgeClient` implementieren (nur Interface + Mock vorhanden) | Feature |
+| 🟡 Mittel | n8n-Alert-Kanal für ReconciliationService verdrahten | Betrieb |
+| 🟡 Mittel | Admin-Trigger-Endpunkt für YieldYearEndService | Feature |
+| 🟡 Mittel | `client/http` Contract-Tests (WireMock) | QS |
+| 🔵 Niedrig | Angular Production Build verifizieren | Deployment |
 
 ### Security Test (Penetration-Test) 🔴
 
