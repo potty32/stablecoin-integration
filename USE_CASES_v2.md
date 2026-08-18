@@ -1,8 +1,8 @@
-# Use Cases — Atruvia Stablecoin Integration Platform · Version 2
+# Use Cases — Atruvia Stablecoin Integration Platform · Version 3
 
-> Stand: 2026-08-17 | Commits: `9252df7` → `653ade6` → `517fa52`  
-> Vollständige, aktuelle Dokumentation aller 26 Use Cases.  
-> Alle Änderungen aus Session 1 (F1–F4) und Session 2 (A1, A2, B, C) sind eingearbeitet.
+> Stand: 2026-08-18 | Commits: `68bb995` (Multi-Tenancy RLS) → `a607b2e` (Inbound Processing)  
+> Vollständige, aktuelle Dokumentation aller 28 Use Cases.  
+> Alle Änderungen aus Session 1–3 sind eingearbeitet.
 
 ---
 
@@ -1184,19 +1184,134 @@ Crash-Recovery:          [System startet neu]
 
 ---
 
+---
+
+## UC-27: Inbound Stablecoin Empfang (Zahlungseingang via Blockchain-Webhook)
+
+**Neu: 2026-08-18** | Commit `a607b2e`
+
+Ein Dritter überweist USDC oder EURC an die Wallet eines Kunden. Circle/Taurus benachrichtigt die Plattform per Webhook. Nach Post-Receive AML-Screening wird der EUR-Gegenwert automatisch auf dem Girokonto gutgeschrieben.
+
+### Akteure
+- Circle / Taurus (Webhook-Sender)
+- Chainalysis (AML-Screening, `direction="incoming"`)
+- CoreBankingClient (Ledger-Buchung)
+- InboundProcessingService (Orchestrierung)
+
+### Ablauf
+
+```
+POST /api/v1/b2b/inbound/webhook (permitAll)
+{walletId, amount, currency, blockchainHash, senderWallet}
+  │
+  ├─ 1. Cross-Tenant-Lookup: adminJdbcTemplate → Wallet → Account → tenantId
+  ├─ 2. TenantContext.set(tenantId)
+  ├─ 3. Idempotenz: findByBlockchainHash → 409 wenn Duplikat
+  ├─ 4. TX: CREATED → INCOMING [REQUIRES_NEW, OutboxMsg: PROCESS_INBOUND_COMPLIANCE]
+  │
+  ├─── LOW/MEDIUM_RISK: ─────────────────────────────────────────────────────────
+  │     COMPLIANCE_PENDING
+  │     FX: EURC×1.0 | USDC×ECB-Kurs (kein FX-Spread, gebührenfrei)
+  │     CoreBankingClient.createLedgerBooking(IBAN, amountEur, "INBOUND_CREDIT")
+  │     COMPLIANCE_APPROVED → SETTLED (201 Created)
+  │
+  └─── HIGH_RISK (z.B. OFAC-Sanktionen): ───────────────────────────────────────
+        COMPLIANCE_PENDING
+        AuditLog: action='AML_INBOUND_BLOCK' (BaFin-Pflicht)
+        COMPLIANCE_REJECTED → FAILED (201 Created, Gelder blockiert)
+```
+
+### Neue State Machine (Inbound-Erweiterung)
+
+```
+Outbound (bestehend):  CREATED → [PENDING_APPROVAL] → COMPLIANCE_CHECKED → FUNDS_HELD → SUBMITTED → SETTLED
+
+Inbound (neu):         CREATED → INCOMING → COMPLIANCE_PENDING ──→ COMPLIANCE_APPROVED → SETTLED
+                                                                 └─→ COMPLIANCE_REJECTED → FAILED
+```
+
+### FX-Berechnung
+
+| Currency | Rate | Spread | Fee |
+|---|---|---|---|
+| EURC | 1.0 (parity) | 0% | 0,00 EUR |
+| USDC | ECB SDMX-JSON (mock: 1.0823) | 0% | 0,00 EUR |
+
+### Crash-Recovery
+`OutboxProcessor.PROCESS_INBOUND_COMPLIANCE`: Bei Systemausfall nach `INCOMING` wird der Compliance-Flow beim Neustart automatisch neu gestartet (idempotent).
+
+---
+
+## UC-28: Mandantenisolation (Multi-Tenancy via PostgreSQL RLS)
+
+**Neu: 2026-08-18** | Commit `68bb995`
+
+Die Plattform ist mandantenfähig. Volksbank-Mandanten sehen ausschließlich ihre eigenen Daten. Die Isolation wird auf DB-Ebene durch PostgreSQL Row-Level Security erzwungen.
+
+### Akteure
+- Volksbank Kleinstadt eG (tenant-kleine-vb)
+- Volksbank Metropole eG (tenant-grosse-vb)
+- Marktbank AG (tenant-marktbank)
+- Atruvia Dev/Default (tenant-default, Seed-Daten)
+
+### Architektur
+
+```
+JWT {tenant: "tenant-kleine-vb"}
+  └─ JwtAuthFilter → TenantContext.set("tenant-kleine-vb")
+  └─ TenantAwareDataSource.getConnection()
+       └─ set_config('app.current_tenant', 'tenant-kleine-vb', false)
+  └─ PostgreSQL RLS-Policy:
+       USING (tenant_id = current_setting('app.current_tenant', true))
+  └─ Nur Rows mit tenant_id = 'tenant-kleine-vb' sichtbar
+  └─ JwtAuthFilter.finally → TenantContext.clear()
+```
+
+### RLS-Tabellen
+
+| Tabelle | tenant_id | Policy |
+|---|---|---|
+| `customer_account` | ✅ | `tenant_isolation_policy` |
+| `stablecoin_transaction` | ✅ | `tenant_isolation_policy` |
+| `address_book` | ✅ | `tenant_isolation_policy` |
+| `yield_position` | ✅ | `tenant_isolation_policy` |
+| `audit_log` | ✅ | `tenant_isolation_policy` |
+| `institutional_address_book` | ❌ | Bank-weit (kein Tenant) |
+| `approval_workflow` | ❌ | Internal (kein Tenant) |
+| `outbox_message` | ❌ | Internal (kein Tenant) |
+
+### Dev-Mandanten (V8 Seed)
+
+| tenant_id | Name | Typ |
+|---|---|---|
+| `tenant-kleine-vb` | Volksbank Kleinstadt eG | COOPERATIVE |
+| `tenant-grosse-vb` | Volksbank Metropole eG | COOPERATIVE |
+| `tenant-marktbank` | Marktbank AG | BANK |
+| `tenant-default` | Default Dev Tenant | DEV |
+
+### Isolation-Beweis
+
+```
+Tenant A JWT → GET /accounts/DE89.../balance → 200 ✅ (eigener Account sichtbar)
+Tenant B JWT → GET /accounts/DE89.../balance → 404 ✅ (RLS filtert fremden Account)
+```
+
+---
+
 ## Technologie-Übersicht
 
 | Schicht | Technologie |
 |---|---|
 | Backend | Spring Boot 3.3.5, Java 21, Maven |
-| Datenbank | PostgreSQL 16 + Flyway (V1 init, V2 Threshold-Fix, V3 Institutional Whitelist) |
+| Datenbank | PostgreSQL 16 + Flyway (V1–V9) |
+| Multi-Tenancy | PostgreSQL RLS + TenantAwareDataSource + TenantContext (ThreadLocal) |
 | Frontend | Angular 18, TypeScript, Standalone Components |
-| Auth | JWT HS256, Secret in `application-dev.yml` |
+| Auth | JWT HS256, `tenant`-Claim für Mandantenidentifikation |
 | FX-Rate | `FxRateService`: Mock (dev, 1.0823) / ECB SDMX-JSON (prod) |
-| Externe APIs (Mock) | Circle (USDC/EURC), Taurus (MPC), Chainalysis (AML), n8n |
-| Resilienz | Resilience4j Circuit Breaker |
-| Observability | OpenTelemetry Tracing, AuditLog (INSERT-only) |
-| Tests | JUnit 5, Spring Boot Test, Testcontainers PostgreSQL 16 |
+| Externe APIs (Mock) | Circle (USDC/EURC), Taurus (MPC), Chainalysis (AML, direction param), n8n |
+| Resilienz | Resilience4j Circuit Breaker + Transactional Outbox (Crash-Recovery) |
+| Observability | OpenTelemetry Tracing, AuditLog (INSERT-only, inkl. `AML_INBOUND_BLOCK`) |
+| Tests | JUnit 5, Spring Boot Test, Testcontainers PostgreSQL 16 · **106 Tests** |
 
 ## Flyway-Migrationen
 

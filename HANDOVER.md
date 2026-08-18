@@ -1,7 +1,8 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-17** | GitHub: https://github.com/potty32/stablecoin-integration
-> Commits heute: `653ade6` → `517fa52` → `9ec182d` → `b8193eb` → `26d0dad` → `7eff98d` → `6431644` → `a7fc187` → `19e41ba` → `1715a55`
+> Letzte Aktualisierung: **2026-08-18** | GitHub: https://github.com/potty32/stablecoin-integration
+> Commits heute (2026-08-18): `68bb995` (Multi-Tenancy RLS) → `a607b2e` (Inbound Processing) → `[QA-Docs]`
+> Commits gestern (2026-08-17): `653ade6` → `517fa52` → `9ec182d` → `b8193eb` → `26d0dad` → `7eff98d` → `6431644` → `a7fc187` → `19e41ba` → `1715a55`
 
 ---
 
@@ -59,7 +60,7 @@ und frage mich, womit wir anfangen sollen.
 | Schicht | Technologie |
 |---|---|
 | Backend | Spring Boot 3.3.5, Java 21, Maven |
-| Datenbank | PostgreSQL 16 + Flyway (V1–V7, siehe Abschnitt 12) |
+| Datenbank | PostgreSQL 16 + Flyway (V1–V9, siehe Abschnitt 12) |
 | Frontend | Angular 18, TypeScript, Standalone Components |
 | Auth | JWT HS256, `JwtAuthFilter` (dev-mode: "dev-user" wenn kein Token) |
 | Externe APIs (Mock) | Circle (USDC/EURC), Taurus (MPC), Chainalysis (AML), n8n, ECB |
@@ -92,18 +93,27 @@ stablecoin-integration/
 │   ├── service/compliance/       # ComplianceService (Chainalysis, Circuit Breaker)
 │   ├── service/fx/               # FxRateService (EURC=1.0, USDC=ECB live)
 │   ├── service/revenue/          # RevenueService (Spread + Fee)
+│   ├── config/                       # 🆕 Multi-Tenancy-Infrastruktur
+│   │   ├── TenantContext.java            # ThreadLocal<String> für Request-Tenant
+│   │   ├── TenantAwareDataSource.java    # set_config('app.current_tenant',?,false) per getConnection()
+│   │   ├── TenantDataSourceConfig.java   # Primary DataSource + adminDataSource (BYPASSRLS)
+│   │   ├── TenantEntityListener.java     # @PrePersist: tenant_id auto-setzen
+│   │   └── TenantAspect.java             # Guard-Layer: loggt fehlenden TenantContext
 │   ├── entity/
-│   │   ├── TransactionStatus.java    # 11 Werte: CREATED, PENDING_APPROVAL, APPROVED, REJECTED,
-│   │   │                             #   EXPIRED, COMPLIANCE_CHECKED, FUNDS_HELD, SUBMITTED,
-│   │   │                             #   SETTLED, REDEEMED, FAILED
+│   │   ├── TransactionStatus.java    # 15 Werte (V9): +INCOMING, COMPLIANCE_PENDING,
+│   │   │                             #   COMPLIANCE_APPROVED, COMPLIANCE_REJECTED
+│   │   ├── Tenant.java               # 🆕 JPA-Entity für tenant-Tabelle (V8)
 │   │   ├── YieldPosition.java        # ACTIVE → CLOSED (NEU, eigener Lebenszyklus)
-│   │   ├── YieldStatus.java          # ACTIVE, CLOSED (NEU)
-│   │   ├── AuditLog.java             # transactionId FK, fromStatus, toStatus, details (V7)
-│   │   └── ...
+│   │   ├── YieldStatus.java          # ACTIVE, CLOSED
+│   │   ├── AuditLog.java             # +tenant_id (V8), transactionId FK, fromStatus, toStatus, details (V7)
+│   │   └── ...                       # CustomerAccount, StablecoinTransaction, AddressBook, YieldPosition
+│   │                                 # alle: +tenant_id Feld + @EntityListeners(TenantEntityListener.class)
+│   ├── service/inbound/              # 🆕 Inbound Processing
+│   │   └── InboundProcessingService.java  # Webhook→INCOMING→AML→EUR-Gutschrift→SETTLED
 │   ├── outbox/
-│   │   └── OutboxProcessor.java      # Recovery: recoverSubmitToBlockchain() (NEU)
+│   │   └── OutboxProcessor.java      # Recovery: recoverSubmitToBlockchain() + recoverInboundCompliance()
 │   ├── client/
-│   │   ├── FxRateClient.java         # Interface (NEU)
+│   │   ├── FxRateClient.java         # Interface
 │   │   ├── mock/MockFxRateClient.java   # 1.0823 (dev)
 │   │   └── http/HttpEcbRateClient.java  # ECB SDMX-JSON (prod)
 │   └── resources/db/migration/
@@ -113,19 +123,23 @@ stablecoin-integration/
 │       ├── V4__add_hold_id_to_transaction.sql
 │       ├── V5__update_transaction_status_enum.sql
 │       ├── V6__add_yield_position.sql
-│       └── V7__refactor_audit_log.sql
+│       ├── V7__refactor_audit_log.sql
+│       ├── V8__enable_row_level_security.sql   # 🆕 tenant-Tabelle + tenant_id + RLS
+│       └── V9__add_inbound_status_values.sql   # 🆕 +4 Status-Werte für Inbound
 ├── backend/src/test/java/de/atruvia/stablecoin/
 │   ├── AbstractLocalDbTest.java        # @SpringBootTest mit lokaler PG (kein Docker)
 │   ├── AbstractIntegrationTest.java    # Testcontainers (disabledWithoutDocker=true)
-│   ├── B2bStateMachineTest.java        # 27 TCs State Machine (Mockito)
+│   ├── B2bStateMachineTest.java        # 27 TCs State Machine (inkl. Inbound-Übergänge)
 │   ├── B2bTransferIntegrationTest.java # 4 TCs Integration
 │   ├── B2bResilienceTest.java          # 4 TCs Resilience (Idempotenz, Recovery)
 │   ├── CommonControllerOwnershipTest.java # 2 TCs Ownership
 │   ├── B2cYieldServiceTest.java        # 5 TCs Yield Service
 │   ├── OutboxProcessorTest.java        # 11 TCs Recovery
-│   ├── ComplianceServiceTest.java      # 5 TCs
+│   ├── ComplianceServiceTest.java      # 5 TCs (inkl. direction-Parameter)
 │   ├── GlobalExceptionHandlerTest.java # 10 TCs
 │   ├── ExportServiceTest.java          # 8 TCs
+│   ├── MultiTenancyIntegrationTest.java # 🆕 5 TCs RLS-Isolation
+│   ├── InboundProcessingTest.java      # 🆕 2 TCs Webhook (LOW/HIGH_RISK)
 │   ├── BulkPaymentServiceTest.java     # 10 TCs
 │   ├── AddressBookServiceTest.java     # 7 TCs
 │   └── InstitutionalAddressBookServiceTest.java # 6 TCs
@@ -347,23 +361,39 @@ sleep 15 && echo "Frontend ready" && curl -s http://localhost:4200 | head -3
 
 ---
 
-## 11. Testabdeckung (Stand 2026-08-17)
+## 11. Testabdeckung (Stand 2026-08-18)
 
-**Gesamt: 99 Tests | LINE: 62,7% | BRANCH: 48,4% | CLASS: 86,7%**
+**Gesamt: 106 Tests | 0 Failures | 0 Errors | LINE: ~65% | BRANCH: ~50% | CLASS: ~88%**
 
 ```
 service/compliance:  100%   outbox:           97%
 service/b2b:          79%   exception:        86%
 service/fx:           83%   entity:           69%
-service/b2c:          40%   controller/b2c:   38%
-controller/b2b:       18%   controller/common: 37%
-client/http:           0%   (prod-only, kein Unit-Test möglich)
+service/inbound:    ~75%   controller/b2c:   38%  (neu 2026-08-18)
+service/b2c:          40%   controller/b2b:   18%
+controller/common:   37%   client/http:        0%  (prod-only)
 ```
+
+Neue Test-Klassen (2026-08-18):
+- `MultiTenancyIntegrationTest` (5 TCs): RLS-Isolation, EntityListener, JWT-Tenant-Propagation
+- `InboundProcessingTest` (2 TCs): LOW_RISK→SETTLED, HIGH_RISK→FAILED+AML_INBOUND_BLOCK
 
 ### Testinfrastruktur
 - `AbstractLocalDbTest`: `@SpringBootTest` mit lokaler PostgreSQL (kein Docker) — läuft immer
 - `AbstractIntegrationTest`: Testcontainers PostgreSQL (`@Testcontainers(disabledWithoutDocker=true)`)
-- Hinweis: `@Transactional` auf Test-Klasse ist inkompatibel mit `REQUIRES_NEW`-Service-Methoden → **nicht** verwenden, stattdessen manuelles Cleanup in `@AfterEach` mit FK-Reihenfolge
+- `MultiTenancyIntegrationTest`: kein Extend von AbstractLocalDbTest — nutzt direkt `application-dev.yml` (stablecoin_app, RLS aktiv)
+- Hinweis: `@Transactional` auf Test-Klasse ist inkompatibel mit `REQUIRES_NEW`-Service-Methoden → **nicht** verwenden, stattdessen manuelles `deleteAllInBatch()` in `@AfterEach`
+
+### Multi-Tenancy Testdaten (2026-08-18)
+
+| Mandant | tenant_id | Dev-Token-URL |
+|---|---|---|
+| Volksbank Kleinstadt | `tenant-kleine-vb` | `/api/v1/auth/dev-token?customerId=cust-b2b-001&tenant=tenant-kleine-vb` |
+| Volksbank Metropole | `tenant-grosse-vb` | `/api/v1/auth/dev-token?customerId=cust-b2b-001&tenant=tenant-grosse-vb` |
+| Marktbank AG | `tenant-marktbank` | `/api/v1/auth/dev-token?customerId=cust-b2b-001&tenant=tenant-marktbank` |
+| Default (Seed-Daten) | `tenant-default` | `/api/v1/auth/dev-token?customerId=cust-b2b-001` |
+
+Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Isolation-Tests neue Accounts mit gesetztem `TenantContext` erstellen.
 
 ---
 
@@ -378,6 +408,8 @@ client/http:           0%   (prod-only, kein Unit-Test möglich)
 | V5 | `V5__update_transaction_status_enum.sql` | Status-CHECK-Constraint: 7 → 11 Werte |
 | V6 | `V6__add_yield_position.sql` | `yield_position` Tabelle + YIELD_REDEEM im type-Constraint |
 | V7 | `V7__refactor_audit_log.sql` | AuditLog: 4 neue Spalten (transactionId, fromStatus, toStatus, details), 4 alte entfernt |
+| V8 | `V8__enable_row_level_security.sql` | **🆕** tenant-Tabelle (4 Dev-Mandanten) + tenant_id auf 5 Tabellen + RLS-Policies |
+| V9 | `V9__add_inbound_status_values.sql` | **🆕** CHECK-Constraint: 11 → 15 Status-Werte (INCOMING, COMPLIANCE_PENDING, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED) |
 
 ---
 
@@ -385,7 +417,7 @@ client/http:           0%   (prod-only, kein Unit-Test möglich)
 
 > ✅ = erledigt | 🔴 = offen/kritisch | 🟡 = offen/mittel | 🔵 = offen/niedrig
 
-### ✅ Heute abgeschlossen
+### ✅ Abgeschlossen 2026-08-17
 - Balance-Widget Frontend + Ownership-Check (CommonController)
 - Live FX-Kurs USDC via ECB (`FxRateService`)
 - Whitelist-Erzwingung im Transfer-Flow (MiCA/FATF)
@@ -398,12 +430,35 @@ client/http:           0%   (prod-only, kein Unit-Test möglich)
 - Ausfallsicherheit (Idempotenz atomar, SUBMIT_TO_BLOCKCHAIN Outbox, CB+Retry)
 - Testabdeckung 13% → 62,7% (99 Tests)
 
+### ✅ Abgeschlossen 2026-08-18 (heute)
+- **Multi-Tenancy via PostgreSQL RLS** (commit `68bb995`)
+  - V8 Migration: `tenant`-Tabelle + `tenant_id` auf 5 Tabellen + RLS-Policies
+  - `TenantAwareDataSource`: `set_config` per Connection-Acquire
+  - JWT `tenant`-Claim → `TenantContext` → DB-Isolation
+  - `TenantEntityListener`: `@PrePersist` setzt `tenant_id` automatisch
+  - `DevAuthController`: Dev-Token mit Tenant-Claim
+  - Angular Login: Mandanten-Dropdown (3 Volksbanken)
+  - `MultiTenancyIntegrationTest`: 5 TCs — RLS-Isolation bewiesen
+- **Inbound Stablecoin Processing** (commit `a607b2e`)
+  - `POST /api/v1/b2b/inbound/webhook` — Circle/Taurus-Webhook-Endpunkt
+  - V9 Migration: 4 neue Status-Werte (INCOMING, COMPLIANCE_PENDING, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED)
+  - Post-Receive AML-Screening mit `direction="incoming"`
+  - FX-Konvertierung: USDC×ECB-Rate (kein Spread), EURC 1:1
+  - Crash-Recovery via OutboxProcessor (`PROCESS_INBOUND_COMPLIANCE`)
+  - `InboundProcessingTest`: 2 TCs — LOW_RISK→SETTLED + HIGH_RISK→FAILED+AML_BLOCK
+- **106 Tests gesamt — alle grün**
+- QA_REVIEW_CHANGES.md erstellt (vollständiger Sprint-Bericht)
+
 ### Testabdeckung
 
 | Priorität | Maßnahme | Gewinn |
 |---|---|---|
 | 🔴 Hoch | `controller/b2b` via MockMvc — 14 Endpunkte testen | +15–20pp LINE |
 | 🔴 Hoch | `service/b2c` Unit-Tests — P2P, Remittance, Micropayment | +10–15pp LINE |
+| 🔴 Hoch | Webhook-HMAC-Signaturprüfung (`X-Circle-Signature`) implementieren | Security |
+| 🔴 Hoch | Rate-Limiting für `/api/v1/b2b/inbound/webhook` (DoS-Schutz) | Security |
+| 🟡 Mittel | `settledAt`-Timestamp in InboundProcessingService setzen | Datenqualität |
+| 🟡 Mittel | Frontend-Widget für Inbound-Transaktionen in TransferListComponent | UX |
 | 🟡 Mittel | `client/http` Contract-Tests (WireMock) | +8pp LINE |
 
 **Ziel: ≥80% LINE, ≥70% BRANCH** (BaFin/IT-Audit-Anforderung)
