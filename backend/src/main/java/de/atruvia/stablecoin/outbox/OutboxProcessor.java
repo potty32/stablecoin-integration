@@ -17,8 +17,10 @@ import de.atruvia.stablecoin.service.revenue.RevenueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,7 +43,13 @@ public class OutboxProcessor {
     private final CircleWalletClient circleWalletClient;
     private final RevenueService revenueService;
 
-    // @Lazy verhindert zirkuläre Abhängigkeiten
+    /**
+     * adminJdbcTemplate (BYPASSRLS — stablecoin-User als Table-Owner) für Cross-Tenant-Lookups.
+     * Der OutboxProcessor läuft ohne JWT-Kontext — adminJdbcTemplate liefert die tenant_id,
+     * bevor TenantContext gesetzt wird, damit txRepository (RLS-User) korrekt filtert.
+     */
+    private final JdbcTemplate adminJdbcTemplate;
+
     @Lazy @Autowired
     private B2bTransferService transferService;
 
@@ -53,12 +61,14 @@ public class OutboxProcessor {
             N8nWebhookClient n8nWebhookClient,
             StablecoinTransactionRepository txRepository,
             CircleWalletClient circleWalletClient,
-            RevenueService revenueService) {
+            RevenueService revenueService,
+            @Qualifier("adminJdbcTemplate") JdbcTemplate adminJdbcTemplate) {
         this.outboxRepository = outboxRepository;
         this.n8nWebhookClient = n8nWebhookClient;
         this.txRepository = txRepository;
         this.circleWalletClient = circleWalletClient;
         this.revenueService = revenueService;
+        this.adminJdbcTemplate = adminJdbcTemplate;
     }
 
     @Scheduled(fixedDelay = 5000)
@@ -106,51 +116,75 @@ public class OutboxProcessor {
 
     /**
      * Crash-Recovery für Inbound-Compliance-Flow.
-     * Wenn System nach INCOMING committed ist, aber vor COMPLIANCE_PENDING crasht,
-     * startet der OutboxProcessor den Compliance-Flow neu.
+     *
+     * Problem: OutboxProcessor hat keinen JWT-Kontext → TenantContext ist leer →
+     * RLS-Policy auf stablecoin_transaction filtert alle Rows → txRepository.findById() gibt null.
+     *
+     * Fix: tenant_id zuerst via adminJdbcTemplate (BYPASSRLS) ermitteln,
+     * dann TenantContext setzen, danach txRepository (RLS-User) aufrufen.
      */
     private void recoverInboundCompliance(OutboxMessage msg) {
         UUID txId = msg.getTransactionId();
-        StablecoinTransaction tx = txRepository.findById(txId).orElse(null);
 
-        if (tx == null) {
+        // 1. Cross-Tenant-Lookup via BYPASSRLS — kein TenantContext nötig
+        String tenantId = lookupTenantIdBypassRls(txId);
+        if (tenantId == null) {
             log.warn("[INBOUND-RECOVERY] TX {} nicht in DB — Outbox als SENT markieren", txId);
             return;
         }
 
-        TransactionStatus status = tx.getStatus();
-        log.info("[INBOUND-RECOVERY] TX={} status={}", txId, status);
+        // 2. TenantContext setzen, damit txRepository (RLS-User stablecoin_app) die TX sieht
+        TenantContext.set(tenantId);
+        try {
+            StablecoinTransaction tx = txRepository.findById(txId).orElse(null);
+            if (tx == null) {
+                log.warn("[INBOUND-RECOVERY] TX {} nicht über RLS sichtbar (tenantId={})", txId, tenantId);
+                return;
+            }
 
-        // Terminal-Zustände: bereits verarbeitet
-        if (EnumSet.of(TransactionStatus.SETTLED, TransactionStatus.FAILED,
-                       TransactionStatus.COMPLIANCE_APPROVED, TransactionStatus.COMPLIANCE_REJECTED).contains(status)) {
-            log.info("[INBOUND-RECOVERY] TX {} bereits in Endzustand {} — keine Recovery nötig", txId, status);
-            return;
-        }
+            TransactionStatus status = tx.getStatus();
+            log.info("[INBOUND-RECOVERY] TX={} tenantId={} status={}", txId, tenantId, status);
 
-        // INCOMING: Compliance-Flow neu starten (idempotent dank COMPLIANCE_PENDING als Zwischenstatus)
-        if (status == TransactionStatus.INCOMING) {
-            log.info("[INBOUND-RECOVERY] Starte Compliance-Flow für TX={}", txId);
-            TenantContext.set(tx.getTenantId());
-            try {
+            // Terminal-Zustände: bereits verarbeitet
+            if (EnumSet.of(TransactionStatus.SETTLED, TransactionStatus.FAILED,
+                           TransactionStatus.COMPLIANCE_APPROVED, TransactionStatus.COMPLIANCE_REJECTED).contains(status)) {
+                log.info("[INBOUND-RECOVERY] TX {} bereits in Endzustand {} — keine Recovery nötig", txId, status);
+                return;
+            }
+
+            // INCOMING: Compliance-Flow neu starten (idempotent dank COMPLIANCE_PENDING als Zwischenstatus)
+            if (status == TransactionStatus.INCOMING) {
+                log.info("[INBOUND-RECOVERY] Starte Compliance-Flow für TX={}", txId);
                 inboundProcessingService.executeInboundComplianceFlow(
                         txId,
                         tx.getSourceWallet(),
                         tx.getCurrency(),
                         tx.getAmountFiat(),
                         tx.getCustomerAccount().getIban());
-            } finally {
-                TenantContext.clear();
+                return;
             }
-            return;
-        }
 
-        log.warn("[INBOUND-RECOVERY] Unerwarteter Status {} für TX={} — manueller Eingriff prüfen", status, txId);
+            log.warn("[INBOUND-RECOVERY] Unerwarteter Status {} für TX={} — manueller Eingriff prüfen", status, txId);
+
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    /**
+     * Ermittelt tenant_id für eine TX unter Umgehung von RLS (adminJdbcTemplate = stablecoin-User, Table-Owner).
+     *
+     * @return tenant_id oder null wenn TX nicht existiert
+     */
+    String lookupTenantIdBypassRls(UUID txId) {
+        List<String> results = adminJdbcTemplate.queryForList(
+                "SELECT tenant_id FROM stablecoin_transaction WHERE id = ?",
+                String.class, txId);
+        return results.isEmpty() ? null : results.get(0);
     }
 
     /**
      * Crash-Recovery für den FUNDS_HELD/SUBMITTED-Bereich.
-     * Wird bei jedem Neustart und alle 5 Sekunden ausgeführt bis die TX finalisiert ist.
      *
      * Mögliche TX-Zustände beim Neustart:
      * - FUNDS_HELD: Circle wurde noch nicht aufgerufen → Alert (manueller Eingriff nötig)
@@ -171,7 +205,6 @@ public class OutboxProcessor {
 
         switch (status) {
             case SETTLED, FAILED, REJECTED, EXPIRED, REDEEMED -> {
-                // TX bereits finalisiert — Recovery nicht nötig
                 log.info("[RECOVERY] TX {} bereits in Endzustand {} — keine Recovery nötig", txId, status);
             }
             case SUBMITTED -> {
@@ -185,8 +218,6 @@ public class OutboxProcessor {
             case FUNDS_HELD -> {
                 log.error("[RECOVERY] TX {} steckt in FUNDS_HELD — Circle wurde noch nicht aufgerufen. " +
                         "Hold={} ist aktiv. Manueller Eingriff erforderlich!", txId, tx.getHoldId());
-                // Hier könnte in Prod ein PagerDuty-Alert ausgelöst werden
-                // TX bleibt in FUNDS_HELD — Hold ist gesperrt, Geld wurde NICHT übertragen
                 throw new IllegalStateException("TX stuck in FUNDS_HELD: " + txId);
             }
             default -> log.warn("[RECOVERY] Unerwarteter Status {} für TX={}", status, txId);
@@ -214,7 +245,6 @@ public class OutboxProcessor {
                 log.warn("[RECOVERY] TX={} via Outbox-Recovery auf FAILED gesetzt, Hold freigegeben", txId);
             }
             default -> {
-                // PENDING oder anderer Zustand: nächste Iteration abwarten
                 log.info("[RECOVERY] TX={} Circle-Status={} — nächste Runde in 5s", txId, circleStatus.status());
                 throw new IllegalStateException("Circle noch nicht fertig: " + circleStatus.status());
             }

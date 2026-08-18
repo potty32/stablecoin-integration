@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin;
 
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.dto.request.b2b.ApproveTransferRequest;
 import de.atruvia.stablecoin.dto.request.b2b.InitiateTransferRequest;
 import de.atruvia.stablecoin.dto.response.TransactionResponse;
@@ -37,11 +38,13 @@ class B2bTransferIntegrationTest extends AbstractLocalDbTest {
 
     @BeforeEach
     void setUp() {
+        TenantContext.set("tenant-default");
         b2bAccount = accountRepository.findByIban(B2B_IBAN).orElseThrow();
     }
 
     @AfterEach
     void cleanup() {
+        TenantContext.clear();
         // Reihenfolge nach FK-Abhängigkeiten
         outboxRepository.deleteAll();
         auditLogRepository.deleteAll();

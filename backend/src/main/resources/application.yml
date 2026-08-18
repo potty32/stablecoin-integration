@@ -28,6 +28,8 @@ springdoc:
     path: /swagger-ui.html
 
 app:
+  webhook:
+    circle-secret: ${CIRCLE_WEBHOOK_SECRET:}
   revenue:
     fx-spread: 0.0015
     fee-b2b: 2.50

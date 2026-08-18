@@ -11,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import de.atruvia.stablecoin.exception.WebhookSignatureException;
 
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -20,6 +21,13 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(WebhookSignatureException.class)
+    public ResponseEntity<ErrorResponse> handleWebhookSignature(WebhookSignatureException ex) {
+        log.warn("[WEBHOOK-SEC] {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse("AUTH_002", ex.getMessage(), getTraceId()));
+    }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {

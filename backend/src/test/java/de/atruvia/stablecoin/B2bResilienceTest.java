@@ -1,5 +1,6 @@
 package de.atruvia.stablecoin;
 
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.client.CircleWalletClient;
 import de.atruvia.stablecoin.client.dto.CircleTransactionStatusDto;
 import de.atruvia.stablecoin.client.dto.CircleTransferResponseDto;
@@ -52,6 +53,7 @@ class B2bResilienceTest extends AbstractLocalDbTest {
 
     @BeforeEach
     void setUp() {
+        TenantContext.set("tenant-default");
         b2bAccount = accountRepository.findByIban(B2B_IBAN).orElseThrow();
         // Whitelist-Eintrag sicherstellen
         if (addressBookRepository.findByCustomerAccountIdAndWalletAddressAndStatus(
@@ -83,6 +85,7 @@ class B2bResilienceTest extends AbstractLocalDbTest {
                 .filter(a -> a.getWalletAddress().equals(WHITELISTED_WALLET))
                 .forEach(addressBookRepository::delete);
         Mockito.reset(circleWalletClient);
+        TenantContext.clear();
     }
 
     // ── TC-R-01: Strikte Idempotenz ───────────────────────────────────────────

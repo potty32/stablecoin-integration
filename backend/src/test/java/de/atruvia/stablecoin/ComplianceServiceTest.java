@@ -89,12 +89,12 @@ class ComplianceServiceTest {
     void fallback_complianceBlockException_rethrowsSame() throws Exception {
         ComplianceBlockException original = new ComplianceBlockException("0xbad", "HIGH");
         Method method = ComplianceService.class.getDeclaredMethod(
-                "screenAddressFallback", String.class, UUID.class, String.class, Throwable.class);
+                "screenAddressFallback", String.class, UUID.class, String.class, String.class, Throwable.class);
         method.setAccessible(true);
 
         assertThatThrownBy(() -> {
             try {
-                method.invoke(complianceService, "0xbad", UUID.randomUUID(), "user-4", original);
+                method.invoke(complianceService, "0xbad", UUID.randomUUID(), "user-4", "outgoing", original);
             } catch (InvocationTargetException e) {
                 throw e.getCause();
             }
@@ -106,12 +106,12 @@ class ComplianceServiceTest {
     void fallback_runtimeException_throwsComplianceBlockWithUnavailable() throws Exception {
         RuntimeException runtimeEx = new RuntimeException("circuit breaker open");
         Method method = ComplianceService.class.getDeclaredMethod(
-                "screenAddressFallback", String.class, UUID.class, String.class, Throwable.class);
+                "screenAddressFallback", String.class, UUID.class, String.class, String.class, Throwable.class);
         method.setAccessible(true);
 
         assertThatThrownBy(() -> {
             try {
-                method.invoke(complianceService, "0xabc", UUID.randomUUID(), "user-5", runtimeEx);
+                method.invoke(complianceService, "0xabc", UUID.randomUUID(), "user-5", "outgoing", runtimeEx);
             } catch (InvocationTargetException e) {
                 throw e.getCause();
             }

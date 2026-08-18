@@ -20,5 +20,9 @@ public abstract class AbstractLocalDbTest {
                 () -> "jdbc:postgresql://localhost:5432/stablecoin_dev");
         registry.add("spring.datasource.username", () -> "stablecoin");
         registry.add("spring.datasource.password", () -> "stablecoin_dev_pass");
+        // Kleinere Pool-Größe für Tests: mehrere Spring-Kontexte im Suite-Run
+        // würden sonst PostgreSQL max_connections (100) erschöpfen.
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "5");
+        registry.add("spring.datasource.hikari.minimum-idle", () -> "2");
     }
 }
