@@ -17,5 +17,9 @@ public enum TransactionStatus {
     INCOMING,             // Zahlungseingang auf Blockchain registriert (Webhook empfangen)
     COMPLIANCE_PENDING,   // Post-Receive AML-Prüfung (Chainalysis) läuft
     COMPLIANCE_APPROVED,  // Geldwäscheprüfung erfolgreich → Gutschrift folgt
-    COMPLIANCE_REJECTED   // Geldwäscheverdacht, Gelder blockiert → FAILED (terminal via FAILED)
+    COMPLIANCE_REJECTED,  // Geldwäscheverdacht, Gelder blockiert → FAILED (terminal via FAILED)
+
+    // --- Enterprise R-Transaktionen und Sammelkonto ---
+    UNASSIGNED,           // Wallet-Adresse keinem Konto zuordenbar — parkt auf Sammelkonto (terminal)
+    RETURNED              // Inbound-Retoure abgeschlossen: Betrag an Absender zurückgesendet (terminal)
 }

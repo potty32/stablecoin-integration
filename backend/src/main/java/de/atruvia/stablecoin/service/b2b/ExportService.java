@@ -4,6 +4,7 @@ import de.atruvia.stablecoin.entity.CustomerAccount;
 import de.atruvia.stablecoin.entity.CustomerType;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
 import de.atruvia.stablecoin.entity.TransactionStatus;
+import de.atruvia.stablecoin.entity.TransactionType;
 import de.atruvia.stablecoin.repository.CustomerAccountRepository;
 import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
 import org.slf4j.Logger;
@@ -46,6 +47,7 @@ public class ExportService {
     private static final Logger log = LoggerFactory.getLogger(ExportService.class);
 
     private static final String CAMT053_NS = "urn:iso:std:iso:20022:tech:xsd:camt.053.001.08";
+    private static final String CAMT054_NS = "urn:iso:std:iso:20022:tech:xsd:camt.054.001.08";
     private static final DateTimeFormatter ISO_DT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
     private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -99,6 +101,119 @@ public class ExportService {
             throw new IllegalStateException("CAMT.053 generation failed: " + e.getMessage(), e);
         }
     }
+
+    // ── CAMT.054 Bank-to-Customer Notification (UC-29: Echtzeit-Avisierung) ─────
+
+    /**
+     * Generiert ein CAMT.054.001.08-Dokument mit allen SETTLED INBOUND-Transaktionen
+     * für das angegebene IBAN. ERP-Systeme (SAP etc.) nutzen es zur Gutschrift-Verarbeitung.
+     */
+    public String generateCamt054(String iban) {
+        CustomerAccount account = accountRepository.findByIban(iban)
+                .orElseThrow(() -> new NoSuchElementException("Konto nicht gefunden: " + iban));
+        List<StablecoinTransaction> inboundTxs = txRepository
+                .findByCustomerAccountIdAndStatus(account.getId(), TransactionStatus.SETTLED, Pageable.unpaged())
+                .getContent()
+                .stream()
+                .filter(tx -> tx.getType() == TransactionType.INBOUND)
+                .toList();
+        try {
+            return buildCamt054Xml(iban, inboundTxs);
+        } catch (Exception e) {
+            throw new RuntimeException("CAMT.054-Erzeugung fehlgeschlagen: " + e.getMessage(), e);
+        }
+    }
+
+    private String buildCamt054Xml(String iban, List<StablecoinTransaction> txList) throws Exception {
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setNamespaceAware(true);
+        DocumentBuilder db = dbf.newDocumentBuilder();
+        Document doc = db.newDocument();
+        String now = LocalDateTime.now().format(ISO_DT);
+        String today = LocalDate.now().format(ISO_DATE);
+
+        Element root = doc.createElementNS(CAMT054_NS, "Document");
+        doc.appendChild(root);
+        Element msg = el54(doc, root, "BkToCstmrDbtCdtNtfctn");
+
+        // GrpHdr
+        Element hdr = el54(doc, msg, "GrpHdr");
+        addText(doc, hdr, "MsgId", "CAMT054-" + iban + "-" + System.currentTimeMillis());
+        addText(doc, hdr, "CreDtTm", now);
+        addText(doc, hdr, "NbOfNtfctns", String.valueOf(txList.isEmpty() ? 0 : 1));
+
+        // Ntfctn
+        Element ntf = el54(doc, msg, "Ntfctn");
+        addText(doc, ntf, "Id", "NTFCTN-" + iban);
+        addText(doc, ntf, "CreDtTm", now);
+
+        Element acct = el54(doc, ntf, "Acct");
+        Element acctId = el54(doc, acct, "Id");
+        addText(doc, acctId, "IBAN", iban);
+
+        for (StablecoinTransaction tx : txList) {
+            String bookDate = tx.getSettledAt() != null
+                    ? tx.getSettledAt().format(ISO_DT)
+                    : now;
+            String valDate = tx.getSettledAt() != null
+                    ? tx.getSettledAt().toLocalDate().format(ISO_DATE)
+                    : today;
+
+            Element ntry = el54(doc, ntf, "Ntry");
+
+            // Betrag in EUR
+            Element amt = doc.createElementNS(CAMT054_NS, "Amt");
+            amt.setAttribute("Ccy", "EUR");
+            amt.setTextContent(tx.getAmountFiat() != null
+                    ? tx.getAmountFiat().setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()
+                    : "0.00");
+            ntry.appendChild(amt);
+
+            addText(doc, ntry, "CdtDbtInd", "CRDT");        // Gutschrift
+            Element sts = el54(doc, ntry, "Sts");
+            addText(doc, sts, "Cd", "BOOK");                  // gebucht
+            Element bookgDt = el54(doc, ntry, "BookgDt");
+            addText(doc, bookgDt, "DtTm", bookDate);
+            Element valDt = el54(doc, ntry, "ValDt");
+            addText(doc, valDt, "Dt", valDate);
+            addText(doc, ntry, "NtryRef", tx.getId().toString());
+
+            // Bank Transaction Code: PMNT/RCDT/ESCT (Received Credit Transfer)
+            Element bkTxCd = el54(doc, ntry, "BkTxCd");
+            Element domn = el54(doc, bkTxCd, "Domn");
+            addText(doc, domn, "Cd", "PMNT");
+            Element fmly = el54(doc, domn, "Fmly");
+            addText(doc, fmly, "Cd", "RCDT");
+            addText(doc, fmly, "SubFmlyCd", "ESCT");
+
+            // NtryDtls
+            Element ntryDtls = el54(doc, ntry, "NtryDtls");
+            Element txDtls = el54(doc, ntryDtls, "TxDtls");
+            Element refs = el54(doc, txDtls, "Refs");
+            addText(doc, refs, "EndToEndId", tx.getId().toString());
+            if (tx.getBlockchainHash() != null) {
+                addText(doc, txDtls, "AddtlTxInf", tx.getBlockchainHash());
+            }
+        }
+
+        // XML serialisieren
+        TransformerFactory tf = TransformerFactory.newInstance();
+        Transformer transformer = tf.newTransformer();
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+        transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
+        transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
+        java.io.StringWriter sw = new java.io.StringWriter();
+        transformer.transform(new DOMSource(doc), new StreamResult(sw));
+        return sw.toString();
+    }
+
+    private Element el54(Document doc, Element parent, String tag) {
+        Element el = doc.createElementNS(CAMT054_NS, tag);
+        parent.appendChild(el);
+        return el;
+    }
+
+    // ── CAMT.053 ──────────────────────────────────────────────────────────────
 
     private String buildCamt053Xml(String iban, List<StablecoinTransaction> txList) throws Exception {
         DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();

@@ -12,11 +12,13 @@ import de.atruvia.stablecoin.entity.StablecoinCurrency;
 import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.dto.request.b2b.AddInstitutionalAddressRequest;
 import de.atruvia.stablecoin.dto.response.InstitutionalAddressBookResponse;
+import de.atruvia.stablecoin.dto.request.ReassignTransactionRequest;
 import de.atruvia.stablecoin.service.b2b.AddressBookService;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
 import de.atruvia.stablecoin.service.b2b.BulkPaymentService;
 import de.atruvia.stablecoin.service.b2b.ExportService;
 import de.atruvia.stablecoin.service.b2b.InstitutionalAddressBookService;
+import de.atruvia.stablecoin.service.b2b.ReassignTransactionService;
 import de.atruvia.stablecoin.service.b2b.SanctionsBatchService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -45,6 +47,7 @@ public class B2bController {
     private final BulkPaymentService bulkPaymentService;
     private final ExportService exportService;
     private final SanctionsBatchService sanctionsBatchService;
+    private final ReassignTransactionService reassignTransactionService;
     private final InstitutionalAddressBookService institutionalAddressBookService;
 
     public B2bController(B2bTransferService transferService,
@@ -52,12 +55,14 @@ public class B2bController {
                          BulkPaymentService bulkPaymentService,
                          ExportService exportService,
                          SanctionsBatchService sanctionsBatchService,
+                         ReassignTransactionService reassignTransactionService,
                          InstitutionalAddressBookService institutionalAddressBookService) {
         this.transferService                = transferService;
         this.addressBookService             = addressBookService;
         this.bulkPaymentService             = bulkPaymentService;
         this.exportService                  = exportService;
         this.sanctionsBatchService          = sanctionsBatchService;
+        this.reassignTransactionService     = reassignTransactionService;
         this.institutionalAddressBookService = institutionalAddressBookService;
     }
 
@@ -177,6 +182,25 @@ public class B2bController {
     }
 
     /**
+     * UC-29: Echtzeit-Avisierung — CAMT.054.001.08 Bank-to-Customer Notification.
+     * Enthält alle einlaufenden Gutschriften (INBOUND, SETTLED) für ERP-Systeme (z.B. SAP).
+     * Optional query param {@code iban}; defaults to the first available B2B IBAN.
+     */
+    @GetMapping("/export/camt054")
+    public ResponseEntity<byte[]> exportCamt054(
+            @RequestParam(required = false) String iban,
+            Authentication auth) {
+        String resolvedIban = exportService.resolveIban(iban);
+        String xml          = exportService.generateCamt054(resolvedIban);
+        String filename     = "camt054-" + resolvedIban + ".xml";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_XML)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(xml.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
      * Downloads SETTLED transactions as a DATEV-compatible CSV file.
      * Optional query param {@code iban}; defaults to the first available B2B IBAN.
      */
@@ -199,6 +223,17 @@ public class B2bController {
     public ResponseEntity<String> triggerSanctionsScan(Authentication auth) {
         sanctionsBatchService.runNightlySanctionsScan();
         return ResponseEntity.ok("{\"message\":\"Sanctions scan completed\"}");
+    }
+
+    /**
+     * UC-31: Manuelle Sammelkonto-Bereinigung.
+     * Ordnet eine UNASSIGNED-Transaktion einem echten Kundenkonto zu
+     * und stößt die nachträgliche Ledger-Gutschrift an.
+     */
+    @PostMapping("/admin/reassign-transaction")
+    public ResponseEntity<TransactionResponse> reassignTransaction(
+            @RequestBody ReassignTransactionRequest request) {
+        return ResponseEntity.ok(reassignTransactionService.reassign(request));
     }
 
     @PostMapping("/institutional-address-book")

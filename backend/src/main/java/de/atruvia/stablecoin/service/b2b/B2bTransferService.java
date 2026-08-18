@@ -52,7 +52,7 @@ public class B2bTransferService {
     private static final Map<TransactionStatus, EnumSet<TransactionStatus>> ALLOWED =
         Map.ofEntries(
             // ── Outbound-Pfad ──────────────────────────────────────────────────
-            entry(CREATED,              EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, INCOMING, FAILED)),
+            entry(CREATED,              EnumSet.of(PENDING_APPROVAL, COMPLIANCE_CHECKED, INCOMING, FAILED, RETURNED)),
             entry(PENDING_APPROVAL,     EnumSet.of(APPROVED, REJECTED, EXPIRED, FAILED)),
             entry(APPROVED,             EnumSet.of(COMPLIANCE_CHECKED, FAILED)),
             entry(COMPLIANCE_CHECKED,   EnumSet.of(FUNDS_HELD, FAILED)),
@@ -63,7 +63,12 @@ public class B2bTransferService {
             entry(INCOMING,             EnumSet.of(COMPLIANCE_PENDING, FAILED)),
             entry(COMPLIANCE_PENDING,   EnumSet.of(COMPLIANCE_APPROVED, COMPLIANCE_REJECTED, FAILED)),
             entry(COMPLIANCE_APPROVED,  EnumSet.of(SETTLED, FAILED)),
-            entry(COMPLIANCE_REJECTED,  EnumSet.of(FAILED))
+            entry(COMPLIANCE_REJECTED,  EnumSet.of(FAILED)),
+            // ── Enterprise: INBOUND_RETURN und UNASSIGNED ──────────────────────
+            // INBOUND_RETURN: CREATED → RETURNED (direkt nach Circle-Transfer) oder FAILED
+            // CREATED → RETURNED ist über den normalen CREATED-Eintrag oben erreichbar:
+            // CREATED bereits in der Map → ergänze RETURNED als gültiges Ziel
+            entry(UNASSIGNED,           EnumSet.of(SETTLED, FAILED))
         );
 
     private final FxRateService fxRateService;

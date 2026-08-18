@@ -89,6 +89,9 @@ public class StablecoinTransaction {
     @Column(name = "tenant_id", nullable = false, length = 50)
     private String tenantId;
 
+    @Column(name = "parent_transaction_id")
+    private UUID parentTransactionId;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
@@ -147,4 +150,6 @@ public class StablecoinTransaction {
     public void setSettledAt(LocalDateTime settledAt) { this.settledAt = settledAt; }
     public String getTenantId() { return tenantId; }
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+    public UUID getParentTransactionId() { return parentTransactionId; }
+    public void setParentTransactionId(UUID parentTransactionId) { this.parentTransactionId = parentTransactionId; }
 }

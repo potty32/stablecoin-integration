@@ -1,6 +1,8 @@
 package de.atruvia.stablecoin.service.inbound;
 
+import de.atruvia.stablecoin.client.CircleWalletClient;
 import de.atruvia.stablecoin.client.CoreBankingClient;
+import de.atruvia.stablecoin.client.dto.CircleTransferRequestDto;
 import de.atruvia.stablecoin.client.dto.LedgerBookingDto;
 import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.dto.request.InboundWebhookRequest;
@@ -56,6 +58,7 @@ public class InboundProcessingService {
     private final ComplianceService complianceService;
     private final FxRateService fxRateService;
     private final CoreBankingClient coreBankingClient;
+    private final CircleWalletClient circleWalletClient;
 
     // REQUIRES_NEW-State-Machine aus B2bTransferService nutzen (shared State Machine)
     @Lazy @Autowired
@@ -73,7 +76,8 @@ public class InboundProcessingService {
             OutboxMessageRepository outboxRepository,
             ComplianceService complianceService,
             FxRateService fxRateService,
-            CoreBankingClient coreBankingClient) {
+            CoreBankingClient coreBankingClient,
+            CircleWalletClient circleWalletClient) {
         this.adminJdbcTemplate = adminJdbcTemplate;
         this.accountRepository = accountRepository;
         this.txRepository = txRepository;
@@ -82,6 +86,7 @@ public class InboundProcessingService {
         this.complianceService = complianceService;
         this.fxRateService = fxRateService;
         this.coreBankingClient = coreBankingClient;
+        this.circleWalletClient = circleWalletClient;
     }
 
     /**
@@ -93,7 +98,15 @@ public class InboundProcessingService {
                 request.walletId(), request.amount(), request.currency(), request.blockchainHash());
 
         // 1. Cross-Tenant-Lookup: adminJdbcTemplate (BYPASSRLS) → kein TenantContext nötig
-        Map<String, Object> accountRow = findAccountRowByWalletAddress(request.walletId());
+        Map<String, Object> accountRow = findAccountRowByWalletAddressOrNull(request.walletId());
+
+        // UC-31: Sammelkonto — unbekannte Wallet → Transaktion nicht verwerfen
+        if (accountRow == null) {
+            log.warn("[INBOUND] Wallet {} keinem Kundenkonto zuordenbar — Buchung auf Sammelkonto",
+                    request.walletId());
+            return self.processUnassignedInbound(request);
+        }
+
         String tenantId  = (String) accountRow.get("tenant_id");
         UUID   accountId = (UUID) accountRow.get("id");
 
@@ -184,7 +197,19 @@ public class InboundProcessingService {
             // AML-Screening (Chainalysis) — direction="incoming" für den Sender
             complianceService.screenAndAssert(senderWallet, txId, "SYSTEM", "incoming");
 
-            // LOW/MEDIUM-Risk: FX-Konvertierung + Core-Banking-Gutschrift
+            // UC-30: Konto-Status-Prüfung vor Gutschrift
+            // Sender ist sauber — prüfe ob Empfänger-Konto aktiv ist
+            CustomerAccount recipientAccount = accountRepository.findByIban(recipientIban)
+                    .orElseThrow(() -> new NoSuchElementException("Konto nicht gefunden: " + recipientIban));
+
+            if (recipientAccount.getStatus() != AccountStatus.ACTIVE) {
+                log.warn("[INBOUND] Konto {} ist {} — automatische Retoure zu Sender {}",
+                        recipientAccount.getCustomerId(), recipientAccount.getStatus(), senderWallet);
+                self.initiateInboundReturn(txId, recipientAccount, senderWallet, currency, amountFiat);
+                return;
+            }
+
+            // LOW/MEDIUM-Risk + aktives Konto: FX-Konvertierung + Core-Banking-Gutschrift
             BigDecimal baseRate = fxRateService.getBaseRate(currency);
             BigDecimal amountEur = amountFiat.multiply(baseRate).setScale(6, RoundingMode.HALF_UP);
 
@@ -224,13 +249,134 @@ public class InboundProcessingService {
 
     // ── Private Helpers ──────────────────────────────────────────────────────
 
-    private Map<String, Object> findAccountRowByWalletAddress(String walletAddress) {
+    // ── UC-30: Automatische Retoure bei inaktivem Konto ─────────────────────
+
+    /**
+     * Erstellt eine INBOUND_RETURN-Transaktion und sendet den Betrag via Circle
+     * an die originale Absender-Wallet zurück.
+     *
+     * Original-TX: COMPLIANCE_APPROVED → FAILED (Konto nicht aktiv)
+     * Return-TX:   CREATED → RETURNED (Circuit-Transfer abgeschlossen)
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void initiateInboundReturn(UUID originalTxId, CustomerAccount account,
+                                      String senderWallet, StablecoinCurrency currency,
+                                      BigDecimal amount) {
+        log.info("[INBOUND-RETURN] Retoure für tx={} senderWallet={} amount={} {}",
+                originalTxId, senderWallet, amount, currency);
+
+        // Original-TX auf FAILED setzen
+        transferService.transitionToFailed(originalTxId,
+                "KONTO_INAKTIV: Retoure an " + senderWallet + " initiiert", "SYSTEM");
+
+        // INBOUND_RETURN-TX anlegen
+        StablecoinTransaction returnTx = new StablecoinTransaction();
+        returnTx.setCustomerAccount(account);
+        returnTx.setIdempotencyKey("return:" + originalTxId);
+        returnTx.setType(TransactionType.INBOUND_RETURN);
+        returnTx.setCurrency(currency);
+        returnTx.setAmountFiat(amount);
+        returnTx.setAmountStablecoin(amount);
+        returnTx.setFxRate(BigDecimal.ONE);
+        returnTx.setFxSpread(BigDecimal.ZERO);
+        returnTx.setTransactionFee(BigDecimal.ZERO);
+        returnTx.setGrossRevenue(BigDecimal.ZERO);
+        returnTx.setSourceWallet("BANK_MASTER_WALLET_ID");
+        returnTx.setDestinationWallet(senderWallet);
+        returnTx.setParentTransactionId(originalTxId);
+        returnTx.setStatus(CREATED);
+        StablecoinTransaction savedReturn = txRepository.save(returnTx);
+
+        // Circle-Transfer: Betrag zurück an Absender
+        circleWalletClient.initiateTransfer(new CircleTransferRequestDto(
+                "return-" + originalTxId,
+                new CircleTransferRequestDto.Source("wallet", "BANK_MASTER_WALLET_ID"),
+                new CircleTransferRequestDto.Destination("blockchain", senderWallet, "POLYGON"),
+                new CircleTransferRequestDto.Amount(amount.toPlainString(), currency.name())
+        ));
+
+        // Return-TX direkt in dieser T3-Transaktion auf RETURNED setzen.
+        // transitionTo(REQUIRED_NEW) kann savedReturn nicht sehen, da T3 noch nicht committed ist —
+        // daher Status direkt setzen statt über den State-Machine-Proxy.
+        savedReturn.setStatus(RETURNED);
+        txRepository.save(savedReturn);
+
+        saveTransitionLog(savedReturn.getId(), CREATED, RETURNED, "SYSTEM",
+                "Retoure abgeschlossen: Betrag=" + amount + " " + currency
+                        + " → " + senderWallet + " (Ursprungs-TX: " + originalTxId + ")");
+
+        log.info("[INBOUND-RETURN] Retoure abgeschlossen: returnTx={} originalTx={}",
+                savedReturn.getId(), originalTxId);
+    }
+
+    // ── UC-31: Sammelkonto für nicht zuordenbare Geldeingänge ───────────────
+
+    /**
+     * Bucht einen Stablecoin-Eingang, dessen Wallet-Adresse keinem Kundenkonto zugeordnet
+     * werden kann, auf das Sammelkonto (customer_id='unassigned-funds').
+     * Status bleibt UNASSIGNED bis ein Sachbearbeiter die manuelle Zuordnung vornimmt.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public TransactionResponse processUnassignedInbound(InboundWebhookRequest request) {
+        // Sammelkonto liegt im 'tenant-default' Mandanten
+        TenantContext.set("tenant-default");
+        try {
+            // Idempotenz-Check (auch für Sammelkonto)
+            txRepository.findByBlockchainHash(request.blockchainHash()).ifPresent(existing -> {
+                throw new IdempotencyConflictException(existing.getId());
+            });
+
+            CustomerAccount collectionAccount = accountRepository.findByCustomerId("unassigned-funds")
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Sammelkonto 'unassigned-funds' nicht gefunden — V10-Migration prüfen"));
+
+            StablecoinCurrency currency = StablecoinCurrency.valueOf(request.currency().toUpperCase());
+
+            StablecoinTransaction tx = new StablecoinTransaction();
+            tx.setCustomerAccount(collectionAccount);
+            tx.setIdempotencyKey("unassigned:" + request.blockchainHash());
+            tx.setType(TransactionType.INBOUND);
+            tx.setCurrency(currency);
+            tx.setAmountFiat(request.amount());
+            tx.setAmountStablecoin(request.amount());
+            tx.setFxRate(BigDecimal.ONE);
+            tx.setFxSpread(BigDecimal.ZERO);
+            tx.setTransactionFee(BigDecimal.ZERO);
+            tx.setGrossRevenue(BigDecimal.ZERO);
+            tx.setSourceWallet(request.senderWallet());
+            tx.setDestinationWallet(request.walletId());
+            tx.setBlockchainHash(request.blockchainHash());
+            tx.setStatus(UNASSIGNED);
+            StablecoinTransaction saved = txRepository.save(tx);
+
+            AuditLog logEntry = new AuditLog();
+            logEntry.setTransactionId(saved.getId());
+            logEntry.setEntityType("StablecoinTransaction");
+            logEntry.setEntityId(saved.getId());
+            logEntry.setAction("UNASSIGNED_INBOUND");
+            logEntry.setUserId("SYSTEM");
+            logEntry.setDetails("Nicht zuordenbare Wallet " + request.walletId()
+                    + " — Betrag=" + request.amount() + " " + currency + " auf Sammelkonto gebucht");
+            auditLogRepository.save(logEntry);
+
+            log.info("[UNASSIGNED] TX {} auf Sammelkonto gebucht: wallet={} amount={} {}",
+                    saved.getId(), request.walletId(), request.amount(), currency);
+            return buildResponse(saved);
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    private Map<String, Object> findAccountRowByWalletAddressOrNull(String walletAddress) {
         List<Map<String, Object>> rows = adminJdbcTemplate.queryForList(
                 "SELECT id, tenant_id FROM customer_account WHERE wallet_address = ?", walletAddress);
-        if (rows.isEmpty()) {
-            throw new NoSuchElementException("Keine Kundenkonto für walletId: " + walletAddress);
-        }
-        return rows.get(0);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private Map<String, Object> findAccountRowByWalletAddress(String walletAddress) {
+        Map<String, Object> row = findAccountRowByWalletAddressOrNull(walletAddress);
+        if (row == null) throw new NoSuchElementException("Kein Kundenkonto für walletId: " + walletAddress);
+        return row;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
