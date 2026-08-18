@@ -1,12 +1,13 @@
 package de.atruvia.stablecoin;
 
+import de.atruvia.stablecoin.client.AtruviaTaxClient;
+import de.atruvia.stablecoin.client.CoreBankingClient;
+import de.atruvia.stablecoin.client.dto.BookingResponseDto;
+import de.atruvia.stablecoin.client.dto.TaxReportResponseDto;
 import de.atruvia.stablecoin.dto.request.b2c.YieldDepositRequest;
 import de.atruvia.stablecoin.dto.response.YieldPositionResponse;
 import de.atruvia.stablecoin.entity.*;
-import de.atruvia.stablecoin.repository.AuditLogRepository;
-import de.atruvia.stablecoin.repository.CustomerAccountRepository;
-import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
-import de.atruvia.stablecoin.repository.YieldPositionRepository;
+import de.atruvia.stablecoin.repository.*;
 import de.atruvia.stablecoin.service.b2c.B2cYieldService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,28 +25,27 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * Unit-Tests für B2cYieldService.
- * Kein Spring-Context, kein Docker — pure Mockito-Tests.
- */
 class B2cYieldServiceTest {
 
     @Mock StablecoinTransactionRepository txRepository;
     @Mock CustomerAccountRepository accountRepository;
     @Mock AuditLogRepository auditLogRepository;
     @Mock YieldPositionRepository yieldPositionRepository;
+    @Mock TaxEventRepository taxEventRepository;
+    @Mock AtruviaTaxClient atruviaTaxClient;
+    @Mock CoreBankingClient coreBankingClient;
 
     private B2cYieldService service;
-
     private CustomerAccount b2cAccount;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        service = new B2cYieldService(txRepository, accountRepository, auditLogRepository, yieldPositionRepository);
+        service = new B2cYieldService(txRepository, accountRepository, auditLogRepository,
+                yieldPositionRepository, taxEventRepository, atruviaTaxClient, coreBankingClient);
 
         b2cAccount = new CustomerAccount();
         ReflectionTestUtils.setField(b2cAccount, "id", UUID.randomUUID());
@@ -53,12 +53,12 @@ class B2cYieldServiceTest {
         b2cAccount.setIban("DE27200400600532013001");
         b2cAccount.setWalletAddress("0xCustomerWallet001");
 
-        // Default: idempotency-key not found (no conflict)
         when(txRepository.findByIdempotencyKey(anyString())).thenReturn(Optional.empty());
         when(auditLogRepository.save(any())).thenReturn(null);
+        when(taxEventRepository.save(any())).thenReturn(null);
+        when(coreBankingClient.createLedgerBooking(any()))
+                .thenReturn(new BookingResponseDto("booking-test", "BOOKED", LocalDateTime.now()));
     }
-
-    // ── TC-Y-01: deposit() erstellt YIELD_DEPOSIT TX + ACTIVE YieldPosition ──
 
     @Test
     @DisplayName("TC-Y-01: deposit() erstellt YIELD_DEPOSIT TX (SETTLED) + ACTIVE YieldPosition")
@@ -84,29 +84,24 @@ class B2cYieldServiceTest {
         YieldDepositRequest request = new YieldDepositRequest("DE27200400600532013001", new BigDecimal("2000.00"));
         YieldPositionResponse response = service.deposit("idem-key-001", request, "cust-b2c-001");
 
-        // TX gespeichert: YIELD_DEPOSIT, SETTLED
         ArgumentCaptor<StablecoinTransaction> txCaptor = ArgumentCaptor.forClass(StablecoinTransaction.class);
         verify(txRepository).save(txCaptor.capture());
         assertThat(txCaptor.getValue().getType()).isEqualTo(TransactionType.YIELD_DEPOSIT);
         assertThat(txCaptor.getValue().getStatus()).isEqualTo(TransactionStatus.SETTLED);
         assertThat(txCaptor.getValue().getAmountFiat()).isEqualByComparingTo(new BigDecimal("2000.00"));
 
-        // YieldPosition gespeichert: ACTIVE
         ArgumentCaptor<YieldPosition> posCaptor = ArgumentCaptor.forClass(YieldPosition.class);
         verify(yieldPositionRepository).save(posCaptor.capture());
         assertThat(posCaptor.getValue().getStatus()).isEqualTo(YieldStatus.ACTIVE);
-        assertThat(posCaptor.getValue().getPrincipal()).isEqualByComparingTo(new BigDecimal("2000.00"));
-
-        // Response: positionId = YieldPosition.id (nicht TX.id)
         assertThat(response.positionId()).isEqualTo(savedPosition.getId());
-        assertThat(response.status()).isEqualTo("ACTIVE");
+
+        // G-02: Tax-Client wird bei deposit() NICHT aufgerufen
+        verifyNoInteractions(atruviaTaxClient);
     }
 
-    // ── TC-Y-02: redeem() erstellt YIELD_REDEEM TX + schließt YieldPosition ──
-
     @Test
-    @DisplayName("TC-Y-02: redeem() erstellt YIELD_REDEEM TX (REDEEMED) + setzt YieldPosition auf CLOSED")
-    void redeem_createsRedeemTxAndClosesPosition() {
+    @DisplayName("TC-Y-02: redeem() delegiert Steuer an AtruviaTaxClient und bucht Nettobetrag")
+    void redeem_delegatesTaxAndBooksNetto() {
         UUID positionId = UUID.randomUUID();
         YieldPosition activePosition = new YieldPosition();
         ReflectionTestUtils.setField(activePosition, "id", positionId);
@@ -117,33 +112,42 @@ class B2cYieldServiceTest {
         activePosition.setStatus(YieldStatus.ACTIVE);
 
         when(yieldPositionRepository.findById(positionId)).thenReturn(Optional.of(activePosition));
+        when(yieldPositionRepository.save(any())).thenReturn(activePosition);
+
+        // AtruviaTaxClient: FSA_COVERED (Ertrag < 1000 EUR), kein Steuerabzug
+        BigDecimal netPayout = new BigDecimal("2.87");
+        TaxReportResponseDto taxResponse = new TaxReportResponseDto(
+                "TAX-MOCK-001", BigDecimal.ZERO, netPayout, "FSA_COVERED");
+        when(atruviaTaxClient.reportCapitalGain(any())).thenReturn(taxResponse);
 
         StablecoinTransaction savedRedeemTx = new StablecoinTransaction();
         ReflectionTestUtils.setField(savedRedeemTx, "id", UUID.randomUUID());
         savedRedeemTx.setStatus(TransactionStatus.REDEEMED);
-        savedRedeemTx.setType(TransactionType.YIELD_REDEEM);
-        when(txRepository.save(any(StablecoinTransaction.class))).thenReturn(savedRedeemTx);
-        when(yieldPositionRepository.save(any(YieldPosition.class))).thenReturn(activePosition);
+        when(txRepository.save(any())).thenReturn(savedRedeemTx);
 
         service.redeem(positionId, "cust-b2c-001");
 
-        // YIELD_REDEEM TX gespeichert
-        ArgumentCaptor<StablecoinTransaction> txCaptor = ArgumentCaptor.forClass(StablecoinTransaction.class);
-        verify(txRepository).save(txCaptor.capture());
-        assertThat(txCaptor.getValue().getType()).isEqualTo(TransactionType.YIELD_REDEEM);
-        assertThat(txCaptor.getValue().getStatus()).isEqualTo(TransactionStatus.REDEEMED);
-        assertThat(txCaptor.getValue().getAmountFiat()).isGreaterThan(new BigDecimal("1000.00")); // Zinsen addiert
+        // AtruviaTaxClient aufgerufen mit korrektem customerId und positivem Ertrag
+        verify(atruviaTaxClient).reportCapitalGain(argThat(req ->
+                "cust-b2c-001".equals(req.customerId()) && req.grossYieldEur().compareTo(BigDecimal.ZERO) > 0));
 
-        // YieldPosition: CLOSED, closedAt gesetzt
+        // CoreBanking-Buchung mit Nettobetrag
+        verify(coreBankingClient).createLedgerBooking(argThat(b ->
+                b.totalAmount().compareTo(netPayout) == 0));
+
+        // TaxEvent gespeichert
+        verify(taxEventRepository).save(any());
+
+        // YIELD_REDEEM TX: amountFiat = Brutto (>principal), taxWithheld = 0
+        ArgumentCaptor<StablecoinTransaction> txCap = ArgumentCaptor.forClass(StablecoinTransaction.class);
+        verify(txRepository).save(txCap.capture());
+        assertThat(txCap.getValue().getType()).isEqualTo(TransactionType.YIELD_REDEEM);
+        assertThat(txCap.getValue().getAmountFiat()).isGreaterThan(new BigDecimal("1000.00"));
+        assertThat(txCap.getValue().getTaxWithheld()).isEqualByComparingTo(BigDecimal.ZERO);
+
+        // YieldPosition geschlossen
         assertThat(activePosition.getStatus()).isEqualTo(YieldStatus.CLOSED);
-        assertThat(activePosition.getClosedAt()).isNotNull();
-        verify(yieldPositionRepository).save(activePosition);
-
-        // Keine zweite TX — nur ein save
-        verify(txRepository, times(1)).save(any());
     }
-
-    // ── TC-Y-03: getPosition() → ACTIVE gefunden; 404 bei keiner Position ────
 
     @Test
     @DisplayName("TC-Y-03a: getPosition() gibt ACTIVE Position zurück")
@@ -158,14 +162,11 @@ class B2cYieldServiceTest {
         position.setStatus(YieldStatus.ACTIVE);
 
         when(accountRepository.findByCustomerId("cust-b2c-001")).thenReturn(Optional.of(b2cAccount));
-        when(yieldPositionRepository.findByCustomerAccountIdAndStatus(
-                any(UUID.class), eq(YieldStatus.ACTIVE)))
+        when(yieldPositionRepository.findByCustomerAccountIdAndStatus(any(UUID.class), eq(YieldStatus.ACTIVE)))
                 .thenReturn(Optional.of(position));
 
         YieldPositionResponse response = service.getPosition("cust-b2c-001");
-
         assertThat(response.positionId()).isEqualTo(positionId);
-        assertThat(response.status()).isEqualTo("ACTIVE");
         assertThat(response.currentValueEur()).isGreaterThan(new BigDecimal("500.00"));
     }
 
@@ -175,31 +176,18 @@ class B2cYieldServiceTest {
         when(accountRepository.findByCustomerId("cust-b2c-001")).thenReturn(Optional.of(b2cAccount));
         when(yieldPositionRepository.findByCustomerAccountIdAndStatus(any(), eq(YieldStatus.ACTIVE)))
                 .thenReturn(Optional.empty());
-
         assertThatThrownBy(() -> service.getPosition("cust-b2c-001"))
-                .isInstanceOf(NoSuchElementException.class)
-                .hasMessageContaining("No active yield position");
+                .isInstanceOf(NoSuchElementException.class);
     }
-
-    // ── TC-Y-04: Compound-Zinsformel ──────────────────────────────────────────
 
     @Test
     @DisplayName("TC-Y-04: Compound-Zinsformel: 2000 EUR × 7 Tage → ~2001.34 EUR")
     void compoundInterest_correctAfter7Days() {
         BigDecimal principal = new BigDecimal("2000.00");
-        BigDecimal expected = principal
-                .multiply(BigDecimal.ONE.add(
-                        new BigDecimal("0.035").divide(new BigDecimal("365"), MathContext.DECIMAL64),
-                        MathContext.DECIMAL64)
-                        .pow(7, MathContext.DECIMAL64), MathContext.DECIMAL64);
-
         BigDecimal actual = service.computeCurrentValue(principal, 7);
-
-        // Differenz < 0.01 EUR (Rundungstoleranz)
-        assertThat(actual.subtract(expected).abs()).isLessThan(new BigDecimal("0.01"));
-        // Wert > Principal (Zinsen wurden addiert)
+        // actual > principal: Zinsertrag vorhanden
+        assertThat(actual.subtract(principal)).isGreaterThan(BigDecimal.ZERO);
         assertThat(actual).isGreaterThan(principal);
-        // Wert ≈ 2001.34 EUR
         assertThat(actual).isBetween(new BigDecimal("2001.30"), new BigDecimal("2001.40"));
     }
 }

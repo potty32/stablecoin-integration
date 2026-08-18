@@ -13,7 +13,9 @@ import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.dto.request.b2b.AddInstitutionalAddressRequest;
 import de.atruvia.stablecoin.dto.response.InstitutionalAddressBookResponse;
 import de.atruvia.stablecoin.dto.request.ReassignTransactionRequest;
+import de.atruvia.stablecoin.dto.request.b2b.KillSwitchRequest;
 import de.atruvia.stablecoin.service.b2b.AddressBookService;
+import de.atruvia.stablecoin.service.b2b.KillSwitchService;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
 import de.atruvia.stablecoin.service.b2b.BulkPaymentService;
 import de.atruvia.stablecoin.service.b2b.ExportService;
@@ -48,6 +50,7 @@ public class B2bController {
     private final ExportService exportService;
     private final SanctionsBatchService sanctionsBatchService;
     private final ReassignTransactionService reassignTransactionService;
+    private final KillSwitchService killSwitchService;
     private final InstitutionalAddressBookService institutionalAddressBookService;
 
     public B2bController(B2bTransferService transferService,
@@ -56,6 +59,7 @@ public class B2bController {
                          ExportService exportService,
                          SanctionsBatchService sanctionsBatchService,
                          ReassignTransactionService reassignTransactionService,
+                         KillSwitchService killSwitchService,
                          InstitutionalAddressBookService institutionalAddressBookService) {
         this.transferService                = transferService;
         this.addressBookService             = addressBookService;
@@ -63,6 +67,7 @@ public class B2bController {
         this.exportService                  = exportService;
         this.sanctionsBatchService          = sanctionsBatchService;
         this.reassignTransactionService     = reassignTransactionService;
+        this.killSwitchService              = killSwitchService;
         this.institutionalAddressBookService = institutionalAddressBookService;
     }
 
@@ -223,6 +228,35 @@ public class B2bController {
     public ResponseEntity<String> triggerSanctionsScan(Authentication auth) {
         sanctionsBatchService.runNightlySanctionsScan();
         return ResponseEntity.ok("{\"message\":\"Sanctions scan completed\"}");
+    }
+
+    // ── G-07: Kill Switch Admin-Endpoints ────────────────────────────────────
+
+    @PostMapping("/admin/kill-switch/activate")
+    public ResponseEntity<String> activateKillSwitch(
+            @RequestBody KillSwitchRequest request, Authentication auth) {
+        if ("GLOBAL".equalsIgnoreCase(request.scope())) {
+            killSwitchService.activateGlobal(request.reason(), auth.getName());
+            return ResponseEntity.ok("{\"message\":\"Globaler Kill Switch aktiviert\"}");
+        }
+        killSwitchService.activateTenant(request.scope(), request.reason(), auth.getName());
+        return ResponseEntity.ok("{\"message\":\"Mandanten Kill Switch aktiviert: " + request.scope() + "\"}");
+    }
+
+    @PostMapping("/admin/kill-switch/deactivate")
+    public ResponseEntity<String> deactivateKillSwitch(
+            @RequestBody KillSwitchRequest request, Authentication auth) {
+        if ("GLOBAL".equalsIgnoreCase(request.scope())) {
+            killSwitchService.deactivateGlobal(auth.getName());
+            return ResponseEntity.ok("{\"message\":\"Globaler Kill Switch deaktiviert\"}");
+        }
+        killSwitchService.deactivateTenant(request.scope(), auth.getName());
+        return ResponseEntity.ok("{\"message\":\"Mandanten Kill Switch deaktiviert: " + request.scope() + "\"}");
+    }
+
+    @GetMapping("/admin/kill-switch/status")
+    public ResponseEntity<Object> killSwitchStatus() {
+        return ResponseEntity.ok(killSwitchService.getGlobalStatus());
     }
 
     /**

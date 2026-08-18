@@ -4,6 +4,7 @@ import de.atruvia.stablecoin.entity.AddressBook;
 import de.atruvia.stablecoin.entity.AuditLog;
 import de.atruvia.stablecoin.entity.CustomerAccount;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
+import de.atruvia.stablecoin.entity.TaxEvent;
 import de.atruvia.stablecoin.entity.YieldPosition;
 import jakarta.persistence.PrePersist;
 
@@ -28,6 +29,8 @@ public class TenantEntityListener {
             if (yp.getTenantId() == null) yp.setTenantId(tenantId);
         } else if (entity instanceof AuditLog al) {
             if (al.getTenantId() == null) al.setTenantId(tenantId);
+        } else if (entity instanceof TaxEvent te) {
+            if (te.getTenantId() == null) te.setTenantId(tenantId);
         }
     }
 }

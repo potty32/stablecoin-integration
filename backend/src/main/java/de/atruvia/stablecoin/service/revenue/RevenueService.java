@@ -1,6 +1,7 @@
 package de.atruvia.stablecoin.service.revenue;
 
 import de.atruvia.stablecoin.entity.CustomerType;
+import de.atruvia.stablecoin.entity.TenantSettings;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -22,11 +23,29 @@ public class RevenueService {
     @Value("${app.revenue.gas-cost-simulated:0.008}")
     private BigDecimal gasCostSimulated;
 
+    /** Bestehende Methode — nutzt globale @Value-Konfiguration (Rückwärtskompatibilität). */
     public RevenueCalculation calculate(BigDecimal volume, CustomerType customerType) {
-        BigDecimal spreadAmount = volume.multiply(fxSpread).setScale(6, RoundingMode.HALF_UP);
+        BigDecimal spread = CustomerType.B2B.equals(customerType) ? fxSpread : fxSpread;
+        BigDecimal spreadAmount = volume.multiply(spread).setScale(6, RoundingMode.HALF_UP);
         BigDecimal fee = CustomerType.B2B.equals(customerType) ? feeB2b : feeB2c;
         BigDecimal grossRevenue = spreadAmount.add(fee).subtract(gasCostSimulated).setScale(6, RoundingMode.HALF_UP);
-        return new RevenueCalculation(fxSpread, spreadAmount, fee, gasCostSimulated, grossRevenue);
+        return new RevenueCalculation(spread, spreadAmount, fee, gasCostSimulated, grossRevenue);
+    }
+
+    /**
+     * G-03: Tenant-spezifische Gebühren und Spreads.
+     * Wird von B2bTransferService mit mandantenspezifischen TenantSettings aufgerufen.
+     */
+    public RevenueCalculation calculate(BigDecimal volume, CustomerType customerType, TenantSettings settings) {
+        BigDecimal spread = CustomerType.B2B.equals(customerType)
+                ? settings.getFxSpreadB2b()
+                : settings.getFxSpreadB2c();
+        BigDecimal fee = CustomerType.B2B.equals(customerType)
+                ? settings.getFeeFlatB2bEur()
+                : settings.getFeeFlatB2cEur();
+        BigDecimal spreadAmount = volume.multiply(spread).setScale(6, RoundingMode.HALF_UP);
+        BigDecimal grossRevenue = spreadAmount.add(fee).subtract(gasCostSimulated).setScale(6, RoundingMode.HALF_UP);
+        return new RevenueCalculation(spread, spreadAmount, fee, gasCostSimulated, grossRevenue);
     }
 
     public record RevenueCalculation(

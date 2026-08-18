@@ -17,9 +17,13 @@ import de.atruvia.stablecoin.exception.ComplianceBlockException;
 import de.atruvia.stablecoin.exception.IdempotencyConflictException;
 import de.atruvia.stablecoin.exception.TaurusLimitExceededException;
 import de.atruvia.stablecoin.repository.*;
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.service.compliance.ComplianceService;
 import de.atruvia.stablecoin.service.fx.FxRateService;
+import de.atruvia.stablecoin.exception.SlippageExceededException;
 import de.atruvia.stablecoin.service.revenue.RevenueService;
+import de.atruvia.stablecoin.service.b2b.TenantSettingsService;
+import de.atruvia.stablecoin.entity.TenantSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,6 +104,7 @@ public class B2bTransferService {
     private final N8nWebhookClient n8nWebhookClient;
     private final AddressBookRepository addressBookRepository;
     private final InstitutionalAddressBookRepository institutionalAddressBookRepository;
+    private final TenantSettingsService tenantSettingsService;
 
     public B2bTransferService(
             StablecoinTransactionRepository txRepository,
@@ -116,7 +121,8 @@ public class B2bTransferService {
             N8nWebhookClient n8nWebhookClient,
             AddressBookRepository addressBookRepository,
             InstitutionalAddressBookRepository institutionalAddressBookRepository,
-            FxRateService fxRateService) {
+            FxRateService fxRateService,
+            TenantSettingsService tenantSettingsService) {
         this.txRepository = txRepository;
         this.accountRepository = accountRepository;
         this.approvalRepository = approvalRepository;
@@ -132,6 +138,7 @@ public class B2bTransferService {
         this.addressBookRepository = addressBookRepository;
         this.institutionalAddressBookRepository = institutionalAddressBookRepository;
         this.fxRateService = fxRateService;
+        this.tenantSettingsService = tenantSettingsService;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -270,6 +277,19 @@ public class B2bTransferService {
             log.warn("[STATE-MACHINE] Auto-released hold={} on FAILED from {}", tx.getHoldId(), current);
         }
 
+        // G-01: Storno-Buchung wenn Ledger bereits verbucht war
+        if (tx.getLedgerBookingReference() != null) {
+            try {
+                coreBankingClient.reverseBooking(tx.getLedgerBookingReference(),
+                        "Storno Transaktionsabbruch: " + reason);
+                log.warn("[STATE-MACHINE] Storno-Buchung tx={} originalRef={}", txId, tx.getLedgerBookingReference());
+            } catch (Exception e) {
+                log.error("[STATE-MACHINE] Storno-Buchung FEHLGESCHLAGEN tx={} ref={}: {}",
+                        txId, tx.getLedgerBookingReference(), e.getMessage());
+                // Kein Re-throw: FAILED-Status wird trotzdem gesetzt (manueller Storno nötig)
+            }
+        }
+
         tx.setStatus(FAILED);
         tx.setFailureReason(reason);
         txRepository.save(tx);
@@ -337,8 +357,15 @@ public class B2bTransferService {
             throw new ComplianceBlockException(request.destinationWallet(), "NOT_WHITELISTED");
         }
 
+        // G-03: Mandantenspezifische Gebühren + G-01: Gross-Debit-Berechnung
+        TenantSettings settings = tenantSettingsService.get(TenantContext.get());
+        BigDecimal tenantSpread = CustomerType.B2B.equals(account.getCustomerType())
+                ? settings.getFxSpreadB2b() : settings.getFxSpreadB2c();
+        BigDecimal tenantFee = CustomerType.B2B.equals(account.getCustomerType())
+                ? settings.getFeeFlatB2bEur() : settings.getFeeFlatB2cEur();
+
         BigDecimal baseRate = fxRateService.getBaseRate(request.currency());
-        BigDecimal effectiveRate = baseRate.add(baseRate.multiply(fxSpread));
+        BigDecimal effectiveRate = baseRate.add(baseRate.multiply(tenantSpread));
         if (request.rateQuoteId() != null) {
             RateQuote quote = rateQuoteRepository.findByIdAndStatus(request.rateQuoteId(), QuoteStatus.ACTIVE)
                     .orElseThrow(() -> new IllegalArgumentException("Rate quote invalid: " + request.rateQuoteId()));
@@ -357,10 +384,17 @@ public class B2bTransferService {
         tx.setCustomerAccount(account);
         tx.setType(TransactionType.OUTBOUND);
         tx.setCurrency(request.currency());
+        // G-01: Gross-Debit = Sendebetrag + Flat-Gebühr + FX-Spread-Betrag
+        BigDecimal spreadAmount = request.amountEur().multiply(tenantSpread).setScale(6, RoundingMode.HALF_UP);
+        BigDecimal grossDebit   = request.amountEur().add(tenantFee).add(spreadAmount).setScale(6, RoundingMode.HALF_UP);
+
         tx.setAmountFiat(request.amountEur());
         tx.setAmountStablecoin(request.amountEur().multiply(effectiveRate).setScale(6, RoundingMode.HALF_UP));
         tx.setFxRate(effectiveRate);
-        tx.setFxSpread(fxSpread);
+        tx.setFxSpread(tenantSpread);
+        tx.setGrossDebit(grossDebit);
+        tx.setFeeAmount(tenantFee);
+        tx.setSlippageToleranceBps(settings.getSlippageToleranceBps());
         tx.setDestinationWallet(request.destinationWallet());
         tx.setSourceWallet(account.getWalletAddress());
         // Status wird via @PrePersist auf CREATED gesetzt
@@ -371,7 +405,8 @@ public class B2bTransferService {
         saveTransitionLog(savedTx.getId(), null, CREATED, initiatorId,
                 "Transfer initiiert: " + request.amountEur() + " EUR " + request.currency());
 
-        boolean requiresApproval = request.amountEur().compareTo(account.getTxLimitSingle()) > 0;
+        // G-03: Vier-Augen-Schwelle aus TenantSettings (statt statischem account.txLimitSingle)
+        boolean requiresApproval = request.amountEur().compareTo(settings.getApprovalThresholdB2b()) > 0;
         if (requiresApproval) {
             ApprovalWorkflow workflow = new ApprovalWorkflow();
             workflow.setTransaction(savedTx);
@@ -441,6 +476,15 @@ public class B2bTransferService {
         });
     }
 
+    /** G-01: Speichert Kernbank-Buchungsreferenz für spätere Storno-Möglichkeit. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void persistLedgerRef(UUID txId, String bookingReference) {
+        txRepository.findById(txId).ifPresent(tx -> {
+            tx.setLedgerBookingReference(bookingReference);
+            txRepository.save(tx);
+        });
+    }
+
     // ── @Retry + @CircuitBreaker Wrapper (via self für AOP-Proxy) ─────────────
 
     @io.github.resilience4j.retry.annotation.Retry(name = "taurus-custody")
@@ -496,9 +540,28 @@ public class B2bTransferService {
             self.transitionTo(txId, COMPLIANCE_CHECKED, userId);
             complianceService.screenAndAssert(tx.getDestinationWallet(), txId, userId, "outgoing");
 
+            // G-06: Slippage-Schutz — Kursabweichung seit Auftragserfassung prüfen
+            if (tx.getFxRate() != null && tx.getCurrency() != StablecoinCurrency.EURC) {
+                BigDecimal rateAtCreation = tx.getFxRate();
+                BigDecimal currentRate    = fxRateService.getBaseRate(tx.getCurrency());
+                int toleranceBps = tx.getSlippageToleranceBps() != null
+                        ? tx.getSlippageToleranceBps() : 100;
+                if (currentRate.compareTo(BigDecimal.ZERO) > 0) {
+                    int actualBps = rateAtCreation.subtract(currentRate).abs()
+                            .divide(rateAtCreation, 8, RoundingMode.HALF_UP)
+                            .multiply(BigDecimal.valueOf(10000))
+                            .intValue();
+                    if (actualBps > toleranceBps) {
+                        throw new SlippageExceededException(actualBps, toleranceBps);
+                    }
+                }
+            }
+
+            // G-01: Hold auf Bruttobetrag (Sendebetrag + Gebühr + Spread)
+            BigDecimal holdAmount = tx.getGrossDebit() != null ? tx.getGrossDebit() : tx.getAmountFiat();
             HoldResponseDto hold = coreBankingClient.createHold(
                     tx.getCustomerAccount().getIban(),
-                    new CreateHoldDto(tx.getAmountFiat(), "EUR", "STABLECOIN_OUTBOUND", txId.toString()));
+                    new CreateHoldDto(holdAmount, "EUR", "STABLECOIN_OUTBOUND_GROSS", txId.toString()));
             self.transitionToFundsHeld(txId, hold.holdId(), userId);
             log.info("[B2B] hold={} tx={}", hold.holdId(), txId);
 
@@ -520,16 +583,24 @@ public class B2bTransferService {
             }
             log.info("[B2B] hash={} tx={}", settled.transactionHash(), txId);
 
+            TenantSettings txSettings = tenantSettingsService.get(TenantContext.get());
             RevenueService.RevenueCalculation revenue = revenueService.calculate(
-                    tx.getAmountFiat(), tx.getCustomerAccount().getCustomerType());
-            coreBankingClient.createLedgerBooking(new LedgerBookingDto(
+                    tx.getAmountFiat(), tx.getCustomerAccount().getCustomerType(), txSettings);
+
+            // G-01: Brutto-Modell — Transit erhält vollen Sendebetrag, Ertragskonto die Gebühren
+            BigDecimal totalGross  = tx.getGrossDebit() != null ? tx.getGrossDebit() : tx.getAmountFiat();
+            BigDecimal revenueAmt  = totalGross.subtract(tx.getAmountFiat()).max(revenue.grossRevenue());
+            BookingResponseDto booking = coreBankingClient.createLedgerBooking(new LedgerBookingDto(
                     txId.toString(), tx.getCustomerAccount().getIban(),
                     List.of(
                             new LedgerBookingDto.CreditEntry("DE00ATRUVIA0001TRANSIT",
-                                    tx.getAmountFiat().subtract(revenue.grossRevenue()), "Stablecoin Transit"),
+                                    tx.getAmountFiat(), "Stablecoin Transit (Sendebetrag netto)"),
                             new LedgerBookingDto.CreditEntry("DE00ATRUVIA0001ERTRAG",
-                                    revenue.grossRevenue(), "Bruttoertrag Bank")),
-                    tx.getAmountFiat(), "EUR", LocalDate.now()));
+                                    revenueAmt, "Bruttoertrag Bank (Gebühr+Spread)")),
+                    totalGross, "EUR", LocalDate.now()));
+
+            // G-01: Buchungsreferenz sichern (ermöglicht Storno bei nachfolgendem FAILED)
+            self.persistLedgerRef(txId, booking.bookingId());
 
             self.settleTransaction(txId, settled.transactionHash(), revenue);
 

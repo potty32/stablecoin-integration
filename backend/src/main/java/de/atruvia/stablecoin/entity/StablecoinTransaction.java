@@ -152,4 +152,34 @@ public class StablecoinTransaction {
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
     public UUID getParentTransactionId() { return parentTransactionId; }
     public void setParentTransactionId(UUID parentTransactionId) { this.parentTransactionId = parentTransactionId; }
+
+    // ── G-01: Buchungskreislauf (V11) ─────────────────────────────────────────
+
+    @Column(name = "gross_debit", precision = 18, scale = 6)
+    private BigDecimal grossDebit;
+
+    @Column(name = "fee_amount", precision = 18, scale = 6)
+    private BigDecimal feeAmount;
+
+    @Column(name = "ledger_booking_reference", length = 100)
+    private String ledgerBookingReference;
+
+    @Column(name = "slippage_tolerance_bps")
+    private Integer slippageToleranceBps;
+
+    // ── G-02: Quellensteuer-Nachweis (V11) ────────────────────────────────────
+
+    @Column(name = "tax_withheld", precision = 18, scale = 6)
+    private BigDecimal taxWithheld;
+
+    public BigDecimal getGrossDebit() { return grossDebit; }
+    public void setGrossDebit(BigDecimal grossDebit) { this.grossDebit = grossDebit; }
+    public BigDecimal getFeeAmount() { return feeAmount; }
+    public void setFeeAmount(BigDecimal feeAmount) { this.feeAmount = feeAmount; }
+    public String getLedgerBookingReference() { return ledgerBookingReference; }
+    public void setLedgerBookingReference(String ledgerBookingReference) { this.ledgerBookingReference = ledgerBookingReference; }
+    public Integer getSlippageToleranceBps() { return slippageToleranceBps; }
+    public void setSlippageToleranceBps(Integer slippageToleranceBps) { this.slippageToleranceBps = slippageToleranceBps; }
+    public BigDecimal getTaxWithheld() { return taxWithheld; }
+    public void setTaxWithheld(BigDecimal taxWithheld) { this.taxWithheld = taxWithheld; }
 }

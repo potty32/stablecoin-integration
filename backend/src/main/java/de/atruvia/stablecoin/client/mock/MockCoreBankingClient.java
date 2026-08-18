@@ -47,6 +47,16 @@ public class MockCoreBankingClient implements CoreBankingClient {
     @Override
     public BookingResponseDto createLedgerBooking(LedgerBookingDto request) {
         String bookingId = "booking-" + UUID.randomUUID().toString().substring(0, 8);
+        log.info("[MOCK CoreBanking] LedgerBooking ref={} debit={} total={}",
+                request.referenceId(), request.debitAccount(), request.totalAmount());
         return new BookingResponseDto(bookingId, "BOOKED", LocalDateTime.now());
+    }
+
+    @Override
+    public BookingResponseDto reverseBooking(String originalBookingReference, String reason) {
+        String stornoId = "storno-" + UUID.randomUUID().toString().substring(0, 8);
+        log.warn("[MOCK CoreBanking] Stornobuchung stornoId={} originalRef={} reason={}",
+                stornoId, originalBookingReference, reason);
+        return new BookingResponseDto(stornoId, "REVERSED", LocalDateTime.now());
     }
 }

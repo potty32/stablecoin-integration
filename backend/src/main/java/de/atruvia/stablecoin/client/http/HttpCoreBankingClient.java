@@ -84,4 +84,19 @@ public class HttpCoreBankingClient implements CoreBankingClient {
                 })
                 .body(BookingResponseDto.class);
     }
+
+    @Override
+    public BookingResponseDto reverseBooking(String originalBookingReference, String reason) {
+        return restClient.post()
+                .uri("/api/v1/ledger/bookings/{ref}/reverse", originalBookingReference)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(java.util.Map.of("reason", reason))
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, (req, response) -> {
+                    byte[] body = response.getBody().readAllBytes();
+                    throw new RuntimeException(
+                            "Core Banking reverseBooking error [" + response.getStatusCode() + "]: " + new String(body));
+                })
+                .body(BookingResponseDto.class);
+    }
 }

@@ -12,6 +12,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import de.atruvia.stablecoin.exception.WebhookSignatureException;
+import de.atruvia.stablecoin.exception.PaymentSystemFrozenException;
+import de.atruvia.stablecoin.exception.SlippageExceededException;
 
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -21,6 +23,20 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(SlippageExceededException.class)
+    public ResponseEntity<ErrorResponse> handleSlippage(SlippageExceededException ex) {
+        log.warn("[SLIPPAGE] {} BPS > {} BPS Limit", ex.getActualBps(), ex.getLimitBps());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ErrorResponse("BIZ_005", ex.getMessage(), getTraceId()));
+    }
+
+    @ExceptionHandler(PaymentSystemFrozenException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentSystemFrozen(PaymentSystemFrozenException ex) {
+        log.error("[KILL-SWITCH] {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ErrorResponse("SYSTEM_003", ex.getMessage(), getTraceId()));
+    }
 
     @ExceptionHandler(WebhookSignatureException.class)
     public ResponseEntity<ErrorResponse> handleWebhookSignature(WebhookSignatureException ex) {

@@ -11,4 +11,10 @@ public interface CoreBankingClient {
     HoldResponseDto createHold(String iban, CreateHoldDto request);
     void releaseHold(String holdId);
     BookingResponseDto createLedgerBooking(LedgerBookingDto request);
+
+    /**
+     * G-01: Stornobuchung für eine bereits erstellte Ledger-Buchung.
+     * Wird aufgerufen wenn eine Transaktion nach Ledger-Commit fehlschlägt.
+     */
+    BookingResponseDto reverseBooking(String originalBookingReference, String reason);
 }

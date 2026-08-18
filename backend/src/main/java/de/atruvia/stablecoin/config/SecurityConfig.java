@@ -1,5 +1,8 @@
 package de.atruvia.stablecoin.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import de.atruvia.stablecoin.service.b2b.KillSwitchService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,6 +26,12 @@ public class SecurityConfig {
     @Value("${app.security.mtls-enabled:false}")
     private boolean mtlsEnabled;
 
+    @Autowired
+    private KillSwitchService killSwitchService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -40,11 +49,17 @@ public class SecurityConfig {
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(killSwitchFilter(), JwtAuthFilter.class);
         if (mtlsEnabled) {
             http.requiresChannel(c -> c.anyRequest().requiresSecure());
         }
         return http.build();
+    }
+
+    @Bean
+    public KillSwitchFilter killSwitchFilter() {
+        return new KillSwitchFilter(killSwitchService, objectMapper);
     }
 
     @Bean
