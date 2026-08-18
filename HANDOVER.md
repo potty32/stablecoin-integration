@@ -1,7 +1,7 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
 > Letzte Aktualisierung: **2026-08-18** | GitHub: https://github.com/potty32/stablecoin-integration
-> Commits heute (2026-08-18): `68bb995` (Multi-Tenancy RLS) → `a607b2e` (Inbound Processing) → `[QA-Docs]`
+> Commits heute (2026-08-18): `68bb995` (Multi-Tenancy RLS) → `a607b2e` (Inbound Processing) → `1cd16f5` (Security: Webhook-Signatur + OutboxProcessor RLS-Fix + settledAt)
 > Commits gestern (2026-08-17): `653ade6` → `517fa52` → `9ec182d` → `b8193eb` → `26d0dad` → `7eff98d` → `6431644` → `a7fc187` → `19e41ba` → `1715a55`
 
 ---
