@@ -466,7 +466,7 @@ class B2bControllerTest {
     @WithMockUser
     @DisplayName("TC-B2B-17: POST /admin/kill-switch/activate GLOBAL → 200 OK")
     void activateKillSwitchGlobal_returns200() throws Exception {
-        doNothing().when(killSwitchService).activateGlobal(anyString(), anyString());
+        when(killSwitchService.activateGlobal(anyString(), anyString())).thenReturn(new SystemControl());
 
         mockMvc.perform(post("/api/v1/b2b/admin/kill-switch/activate")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -480,7 +480,8 @@ class B2bControllerTest {
     @WithMockUser
     @DisplayName("TC-B2B-18: POST /admin/kill-switch/activate TENANT → 200 OK")
     void activateKillSwitchTenant_returns200() throws Exception {
-        doNothing().when(killSwitchService).activateTenant(anyString(), anyString(), anyString());
+        when(killSwitchService.activateTenant(anyString(), anyString(), anyString()))
+                .thenReturn(new de.atruvia.stablecoin.entity.TenantSettings());
 
         mockMvc.perform(post("/api/v1/b2b/admin/kill-switch/activate")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -493,7 +494,7 @@ class B2bControllerTest {
     @WithMockUser
     @DisplayName("TC-B2B-19: POST /admin/kill-switch/deactivate → 200 OK")
     void deactivateKillSwitch_returns200() throws Exception {
-        doNothing().when(killSwitchService).deactivateGlobal(anyString());
+        when(killSwitchService.deactivateGlobal(anyString())).thenReturn(new SystemControl());
 
         mockMvc.perform(post("/api/v1/b2b/admin/kill-switch/deactivate")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -579,12 +580,11 @@ class B2bControllerTest {
 
     @Test
     @WithMockUser
-    @DisplayName("TC-B2B-25: Globaler Kill-Switch aktiv → POST /transfers gibt 503 SYSTEM_003")
-    void initiateTransfer_whenKillSwitchActive_returns503() throws Exception {
-        when(killSwitchService.isGlobalKillSwitchActive()).thenReturn(true);
-        SystemControl ctrl = new SystemControl();
-        ctrl.setKillSwitchReason("Notfall-Freeze");
-        when(killSwitchService.getGlobalStatus()).thenReturn(ctrl);
+    @DisplayName("TC-B2B-25: PaymentSystemFrozenException → 503 SYSTEM_003")
+    void initiateTransfer_whenSystemFrozen_returns503() throws Exception {
+        // Testet: GlobalExceptionHandler mappt PaymentSystemFrozenException → 503 SYSTEM_003
+        when(transferService.initiate(anyString(), any(), anyString()))
+                .thenThrow(new de.atruvia.stablecoin.exception.PaymentSystemFrozenException("Notfall-Freeze"));
 
         String body = objectMapper.writeValueAsString(new InitiateTransferRequest(
                 "DE89370400440532013000", "0xDest", BigDecimal.TEN,

@@ -17,7 +17,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+
+import java.net.http.HttpClient;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -50,11 +53,18 @@ class ClientContractTest {
         wireMock.start();
         baseUrl = "http://localhost:" + wireMock.port();
 
-        RestClient.Builder builder = RestClient.builder();
+        // HTTP/1.1 erzwingen — WireMock 3.x + JDK HttpClient haben HTTP/2-Kompatibilitätsprobleme
+        HttpClient http11Client = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+        JdkClientHttpRequestFactory http11Factory = new JdkClientHttpRequestFactory(http11Client);
 
-        circleClient = new HttpCircleWalletClient(builder, baseUrl, "test-api-key", "WALLET-001");
-        taurusClient = new HttpTaurusCustodyClient(RestClient.builder(), baseUrl, "test-taurus-key");
-        chainalysisClient = new HttpChainalysisClient(RestClient.builder(), baseUrl, "test-chain-key");
+        circleClient = new HttpCircleWalletClient(
+                RestClient.builder().requestFactory(http11Factory), baseUrl, "test-api-key", "WALLET-001");
+        taurusClient = new HttpTaurusCustodyClient(
+                RestClient.builder().requestFactory(http11Factory), baseUrl, "test-taurus-key");
+        chainalysisClient = new HttpChainalysisClient(
+                RestClient.builder().requestFactory(http11Factory), baseUrl, "test-chain-key");
     }
 
     @AfterAll

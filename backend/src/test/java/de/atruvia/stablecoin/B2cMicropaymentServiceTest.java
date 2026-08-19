@@ -194,7 +194,7 @@ class B2cMicropaymentServiceTest {
     void getCardWallet_returnsCorrectBalances() {
         when(accountRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(account));
 
-        CircleWalletBalanceDto balance = new CircleWalletBalanceDto(
+        CircleWalletBalanceDto balance = new CircleWalletBalanceDto(WALLET,
                 List.of(
                         new CircleWalletBalanceDto.Balance("USDC", "150.000000"),
                         new CircleWalletBalanceDto.Balance("EURC", "75.500000")
@@ -214,7 +214,7 @@ class B2cMicropaymentServiceTest {
     void getCardWallet_noBalances_returnsZero() {
         when(accountRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(account));
 
-        CircleWalletBalanceDto balance = new CircleWalletBalanceDto(List.of());
+        CircleWalletBalanceDto balance = new CircleWalletBalanceDto(WALLET, List.of());
         when(circleWalletClient.getWalletBalance(WALLET)).thenReturn(balance);
 
         CardWalletResponse response = service.getCardWallet(CUSTOMER_ID);

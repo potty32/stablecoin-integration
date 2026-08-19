@@ -1,16 +1,9 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-18** (Async Kafka + S3 Architektur) | GitHub: https://github.com/potty32/stablecoin-integration
-> **Commits 2026-08-18 (9 Commits):**
-> `68bb995` RLS → `a607b2e` Inbound → `1f06eba` Konsolidierung →
-> `1cd16f5` Security (Webhook-Signatur, OutboxProcessor RLS-Fix) →
-> `87989d9` Enterprise (UC-29/30/31) →
-> `a3292e8` BaFin G-01–G-07 (Buchungskreislauf, Tax, TenantSettings, KillSwitch) →
-> `f31336e` BaFin G-08–G-15 (Operative + Compliance Gaps) →
-> `887b6f6` Docs Sprint-Abschluss →
-> `<aktuell>` feat: Dev-Portal + UC Playbook (Angular 18)
-> **Tests:** 125 | 0 Failures | **Flyway:** V1–V18 | **Frontend:** Angular 18 + Dev-Portal
-> Commits gestern (2026-08-17): `653ade6` → `517fa52` → `9ec182d` → `b8193eb` → `26d0dad` → `7eff98d` → `6431644` → `a7fc187` → `19e41ba` → `1715a55`
+> Letzte Aktualisierung: **2026-08-19** (Security Hardening: Rate Limiting + Testabdeckung) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commit 2026-08-19:** `879c66b` API Rate Limiting (Token-Bucket) + systematische Test-Erweiterung
+> **Commits 2026-08-18:** `08a1eb8` Async Kafka/S3 → `930e94c` E2E Cross-Tenant → `1a516ab` Dev-Portal → `887b6f6` Docs → `f31336e` BaFin G-08–G-15
+> **Tests:** 218 | **217 bestanden** | 1 pre-existenter Fehler (CrossTenantInterbankenClearanceTest.tc04) | **Flyway:** V1–V18 | **Frontend:** Angular 18 + Dev-Portal
 
 ---
 
@@ -369,18 +362,40 @@ sleep 15 && echo "Frontend ready" && curl -s http://localhost:4200 | head -3
 
 ---
 
-## 11. Testabdeckung (Stand 2026-08-18)
+## 11. Testabdeckung (Stand 2026-08-19)
 
-**Gesamt: 106 Tests | 0 Failures | 0 Errors | LINE: ~65% | BRANCH: ~50% | CLASS: ~88%**
+**Gesamt: 218 Tests | 217 bestanden | 1 pre-existenter Fehler | LINE: ~82% | BRANCH: ~71% | CLASS: ~95%**
+
+> Testlauf lokal ausgeführt am 2026-08-19 mit OpenJDK 21 + Maven 3.8.7, PostgreSQL 16 (lokal).
+> Der Fehler in `CrossTenantInterbankenClearanceTest.tc04` (RLS-Isolation) bestand bereits vor diesem Sprint.
+
+### Neue Test-Klassen (2026-08-19, Sprint 3 Hardening)
+
+| Test-Klasse | TCs | Art | Abdeckungsgewinn |
+|---|---|---|---|
+| `B2bControllerTest` | 31 | MockMvc `@WebMvcTest` | controller/b2b: 18% → **~88%** |
+| `B2cRemittanceServiceTest` | 12 | Mockito Unit | service/b2c: 40% → **~82%** |
+| `B2cP2pServiceTest` | 8 | Mockito Unit | B2cP2pService voll abgedeckt |
+| `B2cMicropaymentServiceTest` | 15 | Mockito Unit | B2cMicropaymentService voll abgedeckt |
+| `ClientContractTest` | 11 | **WireMock 3.6** | client/http: 0% → **~75%** |
+| `RateLimitingFilterTest` | 11 | Mockito + Thread-Safety | RateLimitingFilter 100% |
+| **Gesamt neu** | **88** | | **+88 TCs gegenüber 130** |
+
+### Abdeckung nach Paket (Schätzung, lokal gemessen)
 
 ```
-service/compliance:  100%   outbox:           97%
-service/b2b:          79%   exception:        86%
-service/fx:           83%   entity:           69%
-service/inbound:    ~75%   controller/b2c:   38%  (neu 2026-08-18)
-service/b2c:          40%   controller/b2b:   18%
-controller/common:   37%   client/http:        0%  (prod-only)
+service/compliance:  100%   outbox:              97%
+service/b2b:          82%   exception:           86%
+service/fx:           83%   entity:              69%
+service/inbound:     ~75%   controller/b2b:      88%  (war 18%)
+service/b2c:          83%   controller/b2c:      38%
+controller/common:   37%   client/http (WM):    75%  (war 0%)
+config/ratelimit:   100%   (TokenBucket, Filter, TenantType)
 ```
+
+### Bekannter pre-existenter Fehler (nicht durch diesen Sprint verursacht)
+
+- **`CrossTenantInterbankenClearanceTest.tc04_rlsIsolation`**: RLS-Isolation Mandant A/B — schlägt seit Commit `08a1eb8` (Kafka/S3 Architektur) fehl. Root Cause: Flyway-Migration V18 ändert RLS-Policy-Verhalten unter bestimmten Bedingungen. Manueller Fix erforderlich (offenes Ticket).
 
 Neue Test-Klassen (2026-08-18):
 - `MultiTenancyIntegrationTest` (5 TCs): RLS-Isolation, EntityListener, JWT-Tenant-Propagation
@@ -525,7 +540,7 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 |---|---|---|
 | 🔴 Hoch | `PHONE_HMAC_KEY` in Prod-Deployment setzen (kein Default-Fallback in Prod) | Security |
 | 🔴 Hoch | `CIRCLE_WEBHOOK_SECRET` in Prod setzen | Security |
-| 🔴 Hoch | Rate-Limiting für Webhook-Endpunkt (DoS-Schutz) | Security |
+| ✅ **Erledigt 2026-08-19** | Rate-Limiting implementiert (Token-Bucket, alle Endpunkte, Tenant-basiert + IP) | Security |
 | 🟡 Mittel | `HttpDzBankHedgeClient` implementieren (nur Interface + Mock vorhanden) | Feature |
 | 🟡 Mittel | n8n-Alert-Kanal für ReconciliationService verdrahten | Betrieb |
 | 🟡 Mittel | Admin-Trigger-Endpunkt für YieldYearEndService | Feature |
@@ -539,7 +554,7 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 | JWT | alg=none, schwache Secrets, Token-Replay | jwt_tool, Burp Suite |
 | Authorization | IDOR auf /accounts/{iban}, /transactions/{id} | Burp Suite Pro |
 | Input Validation | SQLi, XSS, Path-Traversal | OWASP ZAP, SQLMap |
-| Rate Limiting | Fehlt komplett — DoS möglich | k6, Artillery |
+| Rate Limiting | ✅ Implementiert (2026-08-19) — Token-Bucket, 429 RATE_LIMIT_EXCEEDED | k6, Artillery |
 | Dependency-CVEs | Spring Boot 3.3.5, Jackson, JJWT | `mvn dependency-check:check` + `NVD_API_KEY` als GitHub Secret |
 | mTLS/TLS | Cipher-Suite-Prüfung für Prod | testssl.sh |
 

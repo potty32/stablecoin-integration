@@ -149,7 +149,7 @@ class B2cP2pServiceTest {
         when(phoneAliasRepository.findByPhoneNumberHash(PHONE_HASH)).thenReturn(Optional.empty());
 
         P2pPhoneRequest request = new P2pPhoneRequest(
-                SENDER_IBAN, PHONE, new BigDecimal("25.00"), "Test"
+                SENDER_IBAN, PHONE, new BigDecimal("25.00")
         );
 
         assertThatThrownBy(() -> service.sendToPhone(IDEM_KEY, request, "user-001"))
@@ -163,7 +163,7 @@ class B2cP2pServiceTest {
         when(accountRepository.findByIban(SENDER_IBAN)).thenReturn(Optional.empty());
 
         P2pPhoneRequest request = new P2pPhoneRequest(
-                SENDER_IBAN, PHONE, new BigDecimal("25.00"), "Test"
+                SENDER_IBAN, PHONE, new BigDecimal("25.00")
         );
 
         assertThatThrownBy(() -> service.sendToPhone(IDEM_KEY, request, "user-001"))
@@ -179,7 +179,7 @@ class B2cP2pServiceTest {
         when(txRepository.findByIdempotencyKey(IDEM_KEY)).thenReturn(Optional.of(existingTx));
 
         P2pPhoneRequest request = new P2pPhoneRequest(
-                SENDER_IBAN, PHONE, new BigDecimal("25.00"), "Test"
+                SENDER_IBAN, PHONE, new BigDecimal("25.00")
         );
 
         assertThatThrownBy(() -> service.sendToPhone(IDEM_KEY, request, "user-001"))
