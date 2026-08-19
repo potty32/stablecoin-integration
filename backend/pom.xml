@@ -154,6 +154,13 @@
             <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- WireMock für Client-Contract-Tests -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.6.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
