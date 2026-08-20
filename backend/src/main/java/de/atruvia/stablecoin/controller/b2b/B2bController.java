@@ -2,9 +2,13 @@ package de.atruvia.stablecoin.controller.b2b;
 
 import de.atruvia.stablecoin.dto.request.b2b.AddAddressRequest;
 import de.atruvia.stablecoin.dto.request.b2b.ApproveTransferRequest;
+import de.atruvia.stablecoin.dto.request.b2b.DvpCancelRequest;
+import de.atruvia.stablecoin.dto.request.b2b.DvpLockRequest;
+import de.atruvia.stablecoin.dto.request.b2b.DvpSettleRequest;
 import de.atruvia.stablecoin.dto.request.b2b.InitiateTransferRequest;
 import de.atruvia.stablecoin.dto.response.AddressBookResponse;
 import de.atruvia.stablecoin.dto.response.BulkPaymentResult;
+import de.atruvia.stablecoin.dto.response.DvpEscrowResponse;
 import de.atruvia.stablecoin.dto.response.RateQuoteResponse;
 import de.atruvia.stablecoin.dto.response.TransactionResponse;
 import de.atruvia.stablecoin.dto.response.TransferPageResponse;
@@ -15,6 +19,7 @@ import de.atruvia.stablecoin.dto.response.InstitutionalAddressBookResponse;
 import de.atruvia.stablecoin.dto.request.ReassignTransactionRequest;
 import de.atruvia.stablecoin.dto.request.b2b.KillSwitchRequest;
 import de.atruvia.stablecoin.service.b2b.AddressBookService;
+import de.atruvia.stablecoin.service.b2b.DvpEscrowService;
 import de.atruvia.stablecoin.service.b2b.KillSwitchService;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
 import de.atruvia.stablecoin.service.b2b.BulkPaymentService;
@@ -52,6 +57,7 @@ public class B2bController {
     private final ReassignTransactionService reassignTransactionService;
     private final KillSwitchService killSwitchService;
     private final InstitutionalAddressBookService institutionalAddressBookService;
+    private final DvpEscrowService dvpEscrowService;
 
     public B2bController(B2bTransferService transferService,
                          AddressBookService addressBookService,
@@ -60,7 +66,8 @@ public class B2bController {
                          SanctionsBatchService sanctionsBatchService,
                          ReassignTransactionService reassignTransactionService,
                          KillSwitchService killSwitchService,
-                         InstitutionalAddressBookService institutionalAddressBookService) {
+                         InstitutionalAddressBookService institutionalAddressBookService,
+                         DvpEscrowService dvpEscrowService) {
         this.transferService                = transferService;
         this.addressBookService             = addressBookService;
         this.bulkPaymentService             = bulkPaymentService;
@@ -69,6 +76,7 @@ public class B2bController {
         this.reassignTransactionService     = reassignTransactionService;
         this.killSwitchService              = killSwitchService;
         this.institutionalAddressBookService = institutionalAddressBookService;
+        this.dvpEscrowService               = dvpEscrowService;
     }
 
     // ─── Transfer endpoints ───────────────────────────────────────────────────
@@ -333,5 +341,41 @@ public class B2bController {
             Authentication auth) {
         institutionalAddressBookService.revokeAddress(id, auth.getName());
         return ResponseEntity.noContent().build();
+    }
+
+    // ── UC-33/34/35: Delivery-versus-Payment (DvP) ──────────────────────────
+
+    /**
+     * UC-33: Sperrt einen Stablecoin-Betrag im DvP-Escrow für ein Wertpapiergeschäft.
+     * Eliminiert Herstatt-Risiko durch atomare Sperre vor der Wertpapierübertragung.
+     */
+    @PostMapping("/dvp/lock")
+    public ResponseEntity<DvpEscrowResponse> dvpLock(
+            @RequestBody @Valid DvpLockRequest request,
+            Authentication auth) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(dvpEscrowService.lock(request, auth.getName()));
+    }
+
+    /**
+     * UC-34: Gibt gesperrte Stablecoins frei, sobald das Wertpapier übertragen wurde.
+     * Wird von der Wertpapierabwicklung (Deka/Union/Clearstream) getriggert.
+     */
+    @PostMapping("/dvp/settle")
+    public ResponseEntity<DvpEscrowResponse> dvpSettle(
+            @RequestBody @Valid DvpSettleRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(dvpEscrowService.settle(request, auth.getName()));
+    }
+
+    /**
+     * UC-35: Löst den Escrow auf und gibt den gesperrten Betrag gebührenfrei zurück.
+     * Wird aufgerufen wenn die Wertpapierübertragung gescheitert ist.
+     */
+    @PostMapping("/dvp/cancel")
+    public ResponseEntity<DvpEscrowResponse> dvpCancel(
+            @RequestBody @Valid DvpCancelRequest request,
+            Authentication auth) {
+        return ResponseEntity.ok(dvpEscrowService.cancel(request, auth.getName()));
     }
 }

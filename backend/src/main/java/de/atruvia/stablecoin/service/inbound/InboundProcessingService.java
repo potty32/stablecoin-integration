@@ -1,8 +1,8 @@
 package de.atruvia.stablecoin.service.inbound;
 
-import de.atruvia.stablecoin.client.CircleWalletClient;
 import de.atruvia.stablecoin.client.CoreBankingClient;
-import de.atruvia.stablecoin.client.dto.CircleTransferRequestDto;
+import de.atruvia.stablecoin.client.TokenAdapterRouter;
+import de.atruvia.stablecoin.client.dto.AdapterTransferRequest;
 import de.atruvia.stablecoin.client.dto.LedgerBookingDto;
 import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.dto.request.InboundWebhookRequest;
@@ -58,7 +58,7 @@ public class InboundProcessingService {
     private final ComplianceService complianceService;
     private final FxRateService fxRateService;
     private final CoreBankingClient coreBankingClient;
-    private final CircleWalletClient circleWalletClient;
+    private final TokenAdapterRouter tokenAdapterRouter;
 
     // REQUIRES_NEW-State-Machine aus B2bTransferService nutzen (shared State Machine)
     @Lazy @Autowired
@@ -77,7 +77,7 @@ public class InboundProcessingService {
             ComplianceService complianceService,
             FxRateService fxRateService,
             CoreBankingClient coreBankingClient,
-            CircleWalletClient circleWalletClient) {
+            TokenAdapterRouter tokenAdapterRouter) {
         this.adminJdbcTemplate = adminJdbcTemplate;
         this.accountRepository = accountRepository;
         this.txRepository = txRepository;
@@ -86,7 +86,7 @@ public class InboundProcessingService {
         this.complianceService = complianceService;
         this.fxRateService = fxRateService;
         this.coreBankingClient = coreBankingClient;
-        this.circleWalletClient = circleWalletClient;
+        this.tokenAdapterRouter = tokenAdapterRouter;
     }
 
     /**
@@ -287,13 +287,14 @@ public class InboundProcessingService {
         returnTx.setStatus(CREATED);
         StablecoinTransaction savedReturn = txRepository.save(returnTx);
 
-        // Circle-Transfer: Betrag zurück an Absender
-        circleWalletClient.initiateTransfer(new CircleTransferRequestDto(
-                "return-" + originalTxId,
-                new CircleTransferRequestDto.Source("wallet", "BANK_MASTER_WALLET_ID"),
-                new CircleTransferRequestDto.Destination("blockchain", senderWallet, "POLYGON"),
-                new CircleTransferRequestDto.Amount(amount.toPlainString(), currency.name())
-        ));
+        // Token-Adapter: Betrag zurück an Absender
+        tokenAdapterRouter.getAdapter(currency)
+                .initiateReturn(new AdapterTransferRequest(
+                        "return-" + originalTxId,
+                        "BANK_MASTER_WALLET_ID",
+                        senderWallet,
+                        amount,
+                        currency));
 
         // Return-TX direkt in dieser T3-Transaktion auf RETURNED setzen.
         // transitionTo(REQUIRED_NEW) kann savedReturn nicht sehen, da T3 noch nicht committed ist —

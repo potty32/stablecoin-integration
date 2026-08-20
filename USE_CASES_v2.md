@@ -1167,6 +1167,109 @@ Später: Admin prüft manuell
 
 ---
 
+## UC-32 · Multi-Token-Adapter-Routing (Token-Adapter-Pattern)
+
+**Kontext:** adesso-Impulspapier August 2026 — DZ Bank Qivalis-Konsortium, AllUnity EURAU (BaFin-live)
+
+**Trigger:** B2B-Transfer mit `currency = EURAU | EURQ` (bisher nur USDC/EURC)
+
+**Architektur-Entscheidung:** Token-Adapter-Pattern statt "Circle-only"-Hardcoding:
+```
+TokenAdapterRouter
+├── USDC, EURC  →  CircleTokenAdapter    (wraps CircleWalletClient, bestehend)
+├── EURAU       →  AllUnityTokenAdapter  (BaFin MiCA Art. 36 Deckungsprüfung)
+└── EURQ        →  QivalisTokenAdapter   (DZ Bank Konsortium 2-of-N Multisig)
+```
+
+**Erweiterbarkeit:** Neuer Issuer = neue `@Component StablecoinTokenAdapter`-Bean. `TokenAdapterRouter` registriert automatisch beim Start.
+
+**BaFin-Relevanz (AllUnity):** Vor jedem EURAU-Transfer prüft `AllUnityTokenAdapter.assertBaFinCoverage()` die Deckungsquote ≥ 105% (MiCA Art. 36). In Produktion gegen die AllUnity-Reserve-API.
+
+**Neue Dateien:**
+- `client/StablecoinTokenAdapter.java` — Interface
+- `client/dto/AdapterTransferRequest.java`, `AdapterTransferResult.java` — DTOs
+- `client/CircleTokenAdapter.java` — Circle-Adapter (USDC/EURC)
+- `client/mock/AllUnityTokenAdapter.java` — EURAU (dev-Profil)
+- `client/mock/QivalisTokenAdapter.java` — EURQ (dev-Profil)
+- `client/TokenAdapterRouter.java` — Dispatch-Registry
+
+**Refactored:** `B2bTransferService.submitToCircle()` → `submitToAdapter()` | `InboundProcessingService` analog
+
+**Testfälle:** `MultiTokenAdapterTest` (6 TCs)
+
+---
+
+## UC-33 · DvP Lock — Stablecoin-Betrag sperren
+
+**Kontext:** Delivery-versus-Payment (DvP) für tokenisierte Wertpapiere eliminiert das Herstatt-Risiko.
+
+**Trigger:** `POST /api/v1/b2b/dvp/lock` (B2B-Kunde initiiert Wertpapierkauf)
+
+**Flow:**
+```
+Kunde (Käufer)                 DvP-Engine              Wertpapier-System (Deka/Union)
+     │                              │                          │
+     │── POST /dvp/lock ───────────►│                          │
+     │   {sourceIban, amountEur,    │                          │
+     │    currency, settlementWallet│                          │
+     │    securitiesIsin, ...}      │                          │
+     │                    coreBankingClient.createHold(iban)   │
+     │                              │                          │
+     │                    dvp_escrow {ESCROWED, holdId}        │
+     │                              │                          │
+     │◄── 201 CREATED ─────────────│                          │
+     │    {escrowId, status=ESCROWED}                          │
+     │                              │──── Wertpapier-Delivery ►│
+```
+
+**RLS:** `dvp_escrow.tenant_id` via `TenantEntityListener`. Mandant sieht nur eigene Escrows.
+
+**Testfälle:** `DvpProcessingTest.tc02_dvpLock_createsEscrowed`
+
+---
+
+## UC-34 · DvP Settle — Stablecoins freigeben
+
+**Trigger:** `POST /api/v1/b2b/dvp/settle` — Wertpapierabwicklung bestätigt erfolgreiche Delivery
+
+**Flow:**
+```
+Wertpapier-System           DvP-Engine                  Token-Adapter
+     │                          │                              │
+     │── POST /dvp/settle ─────►│                              │
+     │   {escrowId, ref}         │── initiateAndConfirm() ────►│
+     │                          │   (EURAU/EURQ/USDC)         │
+     │                          │◄── blockchainHash ──────────│
+     │                 createLedgerBooking(escrow→settlement)  │
+     │                          │                              │
+     │◄── 200 OK ──────────────│                              │
+     │    {status=SETTLED, hash, feeAmount}
+```
+
+**Gebühren:** `TenantSettings.feeFlatB2bEur` → Ertrags-IBAN `DE00ATRUVIA0001ERTRAG`
+
+**Testfälle:** `DvpProcessingTest.tc03_dvpSettle_transitionsToSettled`
+
+---
+
+## UC-35 · DvP Cancel — Escrow auflösen
+
+**Trigger:** `POST /api/v1/b2b/dvp/cancel` — Wertpapierübertragung gescheitert
+
+**Flow:**
+```
+POST /dvp/cancel {escrowId, escrowReference, cancellationReason}
+ → Escrow laden (RLS: nur eigener Mandant)
+ → coreBankingClient.releaseHold(holdId)   ← EUR zurück auf Kundenkonto
+ → status = CANCELLED (gebührenfrei)
+```
+
+**RLS-Sicherheit:** Mandant A kann Mandant B's Escrow nicht canceln → HTTP 404 (RLS filtert)
+
+**Testfälle:** `DvpProcessingTest.tc04, tc06, tc07, tc08`
+
+---
+
 ## State Machine — Transaktionslebenszyklus (aktualisiert V10)
 
 ### Erlaubte Zustandsübergänge (18-Werte-Enum)

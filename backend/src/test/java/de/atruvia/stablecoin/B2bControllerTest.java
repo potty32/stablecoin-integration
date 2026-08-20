@@ -89,6 +89,7 @@ class B2bControllerTest {
     @MockBean SanctionsBatchService sanctionsBatchService;
     @MockBean ReassignTransactionService reassignTransactionService;
     @MockBean InstitutionalAddressBookService institutionalAddressBookService;
+    @MockBean de.atruvia.stablecoin.service.b2b.DvpEscrowService dvpEscrowService;
 
     private UUID txId;
     private UUID addressId;

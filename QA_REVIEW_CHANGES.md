@@ -289,3 +289,128 @@ Return INBOUND_RETURN: CREATED → RETURNED (direkt, da REQUIRES_NEW-Sichtbarkei
 ---
 
 *Generiert: 2026-08-18 | Version: Sprint-Abschluss | Tests: 125 | 0 Failures*
+
+---
+---
+
+# QA Review — Multi-Token-Adapter + DvP Escrow Engine
+## Atruvia Stablecoin Integration Platform — Sprint 2026-08-20
+
+> **Klassifizierung:** INTERN · Für Code-Review und BaFin-Auditierung  
+> **Reviewer:** Principal Cloud-Native & Multi-Token Architect  
+> **Commit:** `feat: implement multi-token adapter pattern and atomic DvP escrow engine`  
+> **Tests:** 232 | 0 Failures | 0 Errors  
+> **Flyway:** V1–V20 (V20 neu: dvp_escrow + RLS + Grants)
+
+---
+
+## 1. Executive Summary
+
+Dieser Sprint transformiert die Plattform von einer "Circle-only"-Architektur zu einer flexiblen Multi-Token/Multi-Issuer-Plattform und implementiert den geschäftskritischen DvP-Use-Case:
+
+1. **Multi-Token-Adapter-Pattern** — Erweiterbare Issuer-Abstraktion (Circle, AllUnity EURAU, Qivalis EURQ)
+2. **DvP Escrow Engine** — Atomarer Sperr-/Freigabemechanismus für tokenisierte Wertpapiergeschäfte (Herstatt-Risiko-Eliminierung)
+3. **StablecoinCurrency-Erweiterung** — EURAU (AllUnity, BaFin-reguliert) und EURQ (DZ Bank Konsortium)
+
+---
+
+## 2. Commit-Übersicht
+
+| Commit | Beschreibung |
+|---|---|
+| `fda4f49` | fix: TC-04 RLS-Isolation + stablecoin_app User + V19 Grant |
+| *(dieser Commit)* | feat: Multi-Token-Adapter-Pattern + Atomic DvP Escrow Engine |
+
+---
+
+## 3. Neue Features & Use Cases
+
+### UC-32 · Multi-Token-Adapter-Routing
+
+**Token-Adapter-Interface:** `StablecoinTokenAdapter` mit `initiateAndConfirm()` + `initiateReturn()`
+
+**Router:** `TokenAdapterRouter` — Spring-Bean, baut automatisch Registry aus allen `StablecoinTokenAdapter`-Beans
+
+**Adapter:**
+
+| Adapter | Währungen | Besonderheit |
+|---------|-----------|-------------|
+| `CircleTokenAdapter` | USDC, EURC | submit + poll-Zyklus (verschoben aus B2bTransferService) |
+| `AllUnityTokenAdapter` | EURAU | BaFin-Deckungsprüfung MiCA Art. 36 (≥105%) |
+| `QivalisTokenAdapter` | EURQ | 2-of-N Multisig simuliert (DZ Bank Konsortium) |
+
+**Refactoring B2bTransferService:**
+- `submitToCircle()` → `submitToAdapter()` (gleiche Resilience4j-Config `circle-wallet`)
+- `pollCircleStatus()` entfernt (Polling lebt jetzt in `CircleTokenAdapter.initiateAndConfirm()`)
+- `CircleWalletClient`-Feld ersetzt durch `TokenAdapterRouter`
+
+**Refactoring InboundProcessingService:**
+- `circleWalletClient.initiateTransfer()` in `initiateInboundReturn()` → `tokenAdapterRouter.getAdapter(currency).initiateReturn(...)`
+
+---
+
+### UC-33/34/35 · DvP Escrow Engine
+
+**Datenmodell:** `dvp_escrow` (V20, RLS aktiv, analog V8-Muster)
+
+**Zustandsmaschine:**
+```
+ESCROWED → SETTLED   (Wertpapier erfolgreich übertragen, Stablecoins freigegeben)
+ESCROWED → CANCELLED (Wertpapierübertragung gescheitert, EUR zurück auf Kundenkonto)
+```
+
+**Endpunkte:**
+
+| Endpoint | UC | HTTP | Beschreibung |
+|----------|----|------|-------------|
+| `POST /api/v1/b2b/dvp/lock` | UC-33 | 201 | Betrag sperren, Hold anlegen |
+| `POST /api/v1/b2b/dvp/settle` | UC-34 | 200 | Stablecoins freigeben, Fee buchen |
+| `POST /api/v1/b2b/dvp/cancel` | UC-35 | 200 | Hold aufheben, EUR zurück |
+
+**RLS-Sicherheit:** `TenantEntityListener` setzt `tenant_id` bei `@PrePersist`. Mandant A kann Mandant B's Escrow nicht settle/cancel → HTTP 404 (PostgreSQL RLS).
+
+---
+
+## 4. Flyway-Migrationen (neu)
+
+| Version | Datei | Inhalt |
+|---------|-------|--------|
+| V19 | `V19__grant_limit_change_log_to_app_user.sql` | GRANT für `limit_change_log` (fehlte seit V16) |
+| V20 | `V20__dvp_escrow_and_multi_token.sql` | `dvp_escrow` Tabelle, RLS, Grants, Indexes |
+
+---
+
+## 5. Neue Fehler-Codes
+
+| Code | HTTP | Exception | Auslöser |
+|------|------|-----------|---------|
+| `NOT_FOUND_001` | 404 | `NoSuchElementException` | DvP-Escrow nicht gefunden / RLS-Isolation |
+| `BIZ_001` | 400 | `IllegalStateException` | Escrow nicht in ESCROWED-Status (Double-Settle/Cancel) |
+
+---
+
+## 6. Test-Coverage
+
+| Klasse | Art | TCs | Scope |
+|--------|-----|-----|-------|
+| `MultiTokenAdapterTest` | Unit (SpringBootTest/NONE) | 6 | Token-Adapter-Routing, BaFin-Coverage |
+| `DvpProcessingTest` | Integration (MockMvc + DB) | 8 | DvP-Zustandszyklus, RLS-Isolation |
+
+**Gesamt: 232 Tests | 232 bestanden | 0 Failures | Δ+14 Tests**
+
+---
+
+## 7. Prod-Deployment-Checkliste (Erweiterung)
+
+- [ ] Flyway V20 ausgeführt (`dvp_escrow` Tabelle + RLS + Grants)
+- [ ] `AllUnityTokenAdapter` durch `HttpAllUnityClient` ersetzen (prod-Profil analog `HttpCircleWalletClient`)
+- [ ] `QivalisTokenAdapter` durch `HttpQivalisClient` ersetzen (prod-Profil)
+- [ ] AllUnity API-Credentials konfigurieren (`app.allunity.api-key`, `app.allunity.base-url`)
+- [ ] Qivalis Consortium-Endpoint konfigurieren (`app.qivalis.rpc-url`, `app.qivalis.signing-key`)
+- [ ] DvP-Fee-Konfiguration in `tenant_settings.fee_flat_b2b_eur` prüfen (Default: 2.50 EUR)
+- [ ] `DVP_ESCROW_INTERNAL_ACCOUNT` im CoreBanking-System anlegen
+- [ ] Alle bisherigen Checklisten-Punkte aus vorherigem Sprint beachten
+
+---
+
+*Generiert: 2026-08-20 | Version: Sprint Multi-Token + DvP | Tests: 232 | 0 Failures*

@@ -1,7 +1,9 @@
 package de.atruvia.stablecoin.service.b2b;
 
-import de.atruvia.stablecoin.client.CircleWalletClient;
 import de.atruvia.stablecoin.client.CoreBankingClient;
+import de.atruvia.stablecoin.client.TokenAdapterRouter;
+import de.atruvia.stablecoin.client.dto.AdapterTransferRequest;
+import de.atruvia.stablecoin.client.dto.AdapterTransferResult;
 import de.atruvia.stablecoin.client.N8nWebhookClient;
 import de.atruvia.stablecoin.client.TaurusCustodyClient;
 import de.atruvia.stablecoin.client.dto.*;
@@ -103,7 +105,7 @@ public class B2bTransferService {
     private final ComplianceService complianceService;
     private final RevenueService revenueService;
     private final CoreBankingClient coreBankingClient;
-    private final CircleWalletClient circleWalletClient;
+    private final TokenAdapterRouter tokenAdapterRouter;
     private final TaurusCustodyClient taurusCustodyClient;
     private final N8nWebhookClient n8nWebhookClient;
     private final AddressBookRepository addressBookRepository;
@@ -126,7 +128,7 @@ public class B2bTransferService {
             ComplianceService complianceService,
             RevenueService revenueService,
             CoreBankingClient coreBankingClient,
-            CircleWalletClient circleWalletClient,
+            TokenAdapterRouter tokenAdapterRouter,
             TaurusCustodyClient taurusCustodyClient,
             N8nWebhookClient n8nWebhookClient,
             AddressBookRepository addressBookRepository,
@@ -143,7 +145,7 @@ public class B2bTransferService {
         this.complianceService = complianceService;
         this.revenueService = revenueService;
         this.coreBankingClient = coreBankingClient;
-        this.circleWalletClient = circleWalletClient;
+        this.tokenAdapterRouter = tokenAdapterRouter;
         this.taurusCustodyClient = taurusCustodyClient;
         this.n8nWebhookClient = n8nWebhookClient;
         this.addressBookRepository = addressBookRepository;
@@ -539,31 +541,21 @@ public class B2bTransferService {
     }
 
     @io.github.resilience4j.retry.annotation.Retry(name = "circle-wallet")
-    @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "circle-wallet", fallbackMethod = "circleTransferFallback")
-    public CircleTransferResponseDto submitToCircle(StablecoinTransaction tx, String userId) {
-        return circleWalletClient.initiateTransfer(new CircleTransferRequestDto(
-                tx.getIdempotencyKey(),
-                new CircleTransferRequestDto.Source("wallet", "BANK_MASTER_WALLET_ID"),
-                new CircleTransferRequestDto.Destination("blockchain", tx.getDestinationWallet(), "MATIC"),
-                new CircleTransferRequestDto.Amount(tx.getAmountStablecoin().toPlainString(), tx.getCurrency().name())));
+    @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "circle-wallet", fallbackMethod = "adapterSubmitFallback")
+    public AdapterTransferResult submitToAdapter(StablecoinTransaction tx, String userId) {
+        return tokenAdapterRouter.getAdapter(tx.getCurrency())
+                .initiateAndConfirm(new AdapterTransferRequest(
+                        tx.getIdempotencyKey(),
+                        "BANK_MASTER_WALLET_ID",
+                        tx.getDestinationWallet(),
+                        tx.getAmountStablecoin(),
+                        tx.getCurrency()));
     }
 
-    public CircleTransferResponseDto circleTransferFallback(StablecoinTransaction tx, String userId, Throwable ex) {
-        log.error("[CB/RETRY] Circle unavailable for tx={}: {}", tx.getId(), ex.getMessage());
-        self.transitionToFailed(tx.getId(), "CIRCLE_UNAVAILABLE: " + ex.getMessage(), userId);
-        throw new IllegalStateException("Circle nicht erreichbar — TX abgebrochen, Hold freigegeben", ex);
-    }
-
-    @io.github.resilience4j.retry.annotation.Retry(name = "circle-wallet")
-    @io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker(name = "circle-wallet", fallbackMethod = "pollCircleStatusFallback")
-    public CircleTransactionStatusDto pollCircleStatus(String circleId, UUID txId, String userId) {
-        return circleWalletClient.getTransactionStatus(circleId);
-    }
-
-    public CircleTransactionStatusDto pollCircleStatusFallback(String circleId, UUID txId, String userId, Throwable ex) {
-        log.error("[CB/RETRY] Circle poll unavailable for tx={} circleId={}: {}", txId, circleId, ex.getMessage());
-        self.transitionToFailed(txId, "CIRCLE_POLL_UNAVAILABLE: " + ex.getMessage(), userId);
-        throw new IllegalStateException("Circle Status-Abfrage nicht erreichbar — TX abgebrochen, Hold freigegeben", ex);
+    public AdapterTransferResult adapterSubmitFallback(StablecoinTransaction tx, String userId, Throwable ex) {
+        log.error("[CB/RETRY] Token-Adapter unavailable for tx={}: {}", tx.getId(), ex.getMessage());
+        self.transitionToFailed(tx.getId(), "ADAPTER_UNAVAILABLE: " + ex.getMessage(), userId);
+        throw new IllegalStateException("Token-Adapter nicht erreichbar — TX abgebrochen, Hold freigegeben", ex);
     }
 
     // ── Kern-Orchestration ────────────────────────────────────────────────────
@@ -605,17 +597,11 @@ public class B2bTransferService {
 
             self.transitionTo(txId, SUBMITTED, userId);
 
-            // Circle: @Retry(3x) + @CircuitBreaker — idempotency-key schützt vor Doppelbuchung
-            CircleTransferResponseDto circleInit = self.submitToCircle(tx, userId);
-            self.persistCircleId(txId, circleInit.id());
-            log.info("[B2B] circle={} tx={}", circleInit.id(), txId);
-
-            // Circle Status pollen: @Retry(3x) + @CircuitBreaker
-            CircleTransactionStatusDto settled = self.pollCircleStatus(circleInit.id(), txId, userId);
-            if (!"COMPLETE".equals(settled.status())) {
-                throw new IllegalStateException("Circle not COMPLETE: " + settled.status());
-            }
-            log.info("[B2B] hash={} tx={}", settled.transactionHash(), txId);
+            // Token-Adapter: @Retry(3x) + @CircuitBreaker — idempotency-key schützt vor Doppelbuchung
+            AdapterTransferResult adapterResult = self.submitToAdapter(tx, userId);
+            self.persistCircleId(txId, adapterResult.adapterTransactionId());
+            log.info("[B2B] adapterId={} tx={}", adapterResult.adapterTransactionId(), txId);
+            log.info("[B2B] hash={} tx={}", adapterResult.blockchainHash(), txId);
 
             TenantSettings txSettings = tenantSettingsService.get(TenantContext.get());
             RevenueService.RevenueCalculation revenue = revenueService.calculate(
@@ -636,12 +622,12 @@ public class B2bTransferService {
             // G-01: Buchungsreferenz sichern (ermöglicht Storno bei nachfolgendem FAILED)
             self.persistLedgerRef(txId, booking.bookingId());
 
-            self.settleTransaction(txId, settled.transactionHash(), revenue);
+            self.settleTransaction(txId, adapterResult.blockchainHash(), revenue);
 
             StablecoinTransaction result = txRepository.findById(txId).orElseThrow();
             notifyN8n(result, revenue);
             saveOutboxMessage(txId, "TRANSACTION_SETTLED",
-                    String.format("{\"hash\":\"%s\",\"revenue\":\"%s\"}", settled.transactionHash(), revenue.grossRevenue()));
+                    String.format("{\"hash\":\"%s\",\"revenue\":\"%s\"}", adapterResult.blockchainHash(), revenue.grossRevenue()));
             log.info("[B2B] SETTLED tx={} revenue={}EUR", txId, revenue.grossRevenue());
             return toResponse(result, false);
 

@@ -1,10 +1,11 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-20** (Bugfix: TC-04 RLS-Isolation + fehlende DB-Grants) | GitHub: https://github.com/potty32/stablecoin-integration
+> Letzte Aktualisierung: **2026-08-20** (feat: Multi-Token-Adapter-Pattern + Atomic DvP Escrow Engine) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commit 2026-08-20 (neu):** feat: Multi-Token-Adapter-Pattern (EURAU/EURQ) + DvP Escrow Engine (UC-32–35) + V20
 > **Commit 2026-08-20:** TC-04 Fix (stablecoin_app User + V19 Grant limit_change_log + docker-compose Init-Script)
 > **Commit 2026-08-19:** `879c66b` API Rate Limiting (Token-Bucket) + systematische Test-Erweiterung
 > **Commits 2026-08-18:** `08a1eb8` Async Kafka/S3 → `930e94c` E2E Cross-Tenant → `1a516ab` Dev-Portal → `887b6f6` Docs → `f31336e` BaFin G-08–G-15
-> **Tests:** 218 | **218 bestanden** | 0 Fehler | **Flyway:** V1–V19 | **Frontend:** Angular 18 + Dev-Portal
+> **Tests:** 232 | **232 bestanden** | 0 Fehler | **Flyway:** V1–V20 | **Frontend:** Angular 18 + Dev-Portal
 
 ---
 
