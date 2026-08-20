@@ -103,6 +103,18 @@ interface Tab {
           → Dashboard
         </button>
 
+        <!-- Testdaten-Reset Button -->
+        <button (click)="resetSeedData()"
+                [disabled]="seedResetting"
+                style="background:transparent;border:1px solid #7c3aed;border-radius:8px;
+                       padding:0.4rem 0.75rem;font-size:0.75rem;cursor:pointer;
+                       color:#a78bfa;transition:background .2s;"
+                onmouseover="this.style.background='rgba(124,58,237,.15)'"
+                onmouseout="this.style.background='transparent'"
+                [title]="'Alle Transaktionen löschen und Testdaten neu laden'">
+          {{ seedResetting ? '⟳ Zurücksetzen...' : '🔄 Testdaten zurücksetzen' }}
+        </button>
+
         <button (click)="logout()" *ngIf="currentUser"
                 style="background:transparent;color:#94a3b8;border:1px solid #334155;
                        border-radius:8px;padding:0.4rem 0.75rem;font-size:0.75rem;cursor:pointer;">
@@ -110,6 +122,15 @@ interface Tab {
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Seed-Reset Toast -->
+  <div *ngIf="seedToast"
+    style="position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:2000;
+           background:#1e293b;border:1px solid #7c3aed;border-radius:10px;
+           padding:12px 24px;color:#e2e8f0;font-size:13px;
+           box-shadow:0 4px 20px rgba(0,0,0,.4);">
+    {{ seedToast }}
   </div>
 
   <div style="max-width:1400px;margin:0 auto;padding:2rem;">
@@ -1089,6 +1110,31 @@ export class DevPortalComponent implements OnInit {
       ]
     }
   ];
+
+  // ── Seed Reset State ─────────────────────────────────────────────────────────
+
+  seedResetting = false;
+  seedToast: string | null = null;
+
+  resetSeedData() {
+    if (this.seedResetting) return;
+    this.seedResetting = true;
+    this.seedToast = null;
+    this.http.post<{ message: string; deletedRows: number; addressBookEntries: number }>(
+      '/api/v1/dev/seed/reset', {}
+    ).subscribe({
+      next: res => {
+        this.seedResetting = false;
+        this.seedToast = `✅ ${res.message} — ${res.deletedRows} Zeilen gelöscht, ${res.addressBookEntries} Address-Book-Einträge wiederhergestellt`;
+        setTimeout(() => this.seedToast = null, 5000);
+      },
+      error: () => {
+        this.seedResetting = false;
+        this.seedToast = '❌ Fehler beim Zurücksetzen. Backend läuft? dev-Profil aktiv?';
+        setTimeout(() => this.seedToast = null, 4000);
+      }
+    });
+  }
 
   // ── Copilot Chat State ────────────────────────────────────────────────────────
 
