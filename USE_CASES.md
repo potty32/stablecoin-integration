@@ -1,10 +1,13 @@
-# Use Cases — Atruvia Stablecoin Integration Platform (Changelog-Dokument)
+# Use Cases — Atruvia Stablecoin Integration Platform (VERALTET — Archivdokument)
 
-> **Dieses Dokument ist ein Changelog und historisches Referenzdokument.**
-> Es dokumentiert alle Änderungen pro Commit, enthält aber den ursprünglichen UC-Inhalt
-> (Stand der Ersterstellung) — die UC-Abschnitte sind NICHT vollständig aktualisiert.
+> ⚠️ **DEPRECATED — Dieses Dokument ist veraltet und dient nur noch als historisches Archiv.**
 >
-> ➡️ **Für den aktuellen, vollständigen Stand aller 26 Use Cases: `USE_CASES_v2.md` lesen.**
+> **Bekannte Fehlinformationen:**
+> - UC-17 (Yield-Auflösung): Zeigt `FAILED` als Redeem-Marker — **FALSCH**. Korrekt ist `REDEEMED` (seit State-Machine-Refactoring, `TransactionStatus.REDEEMED`)
+> - UC-03 (Timeline): Zeigt Regex-basierten Code — **VERALTET**. Korrekt: `AuditLogRepository.findByTransactionIdOrderByTimestampAsc()` mit `fromStatus`/`toStatus`-Spalten
+> - UC-Nummerierung: Entspricht nicht der aktuellen USE_CASES_v2.md-Nummerierung
+>
+> ➡️ **Für den aktuellen, vollständigen Stand aller 36+ Use Cases: [`USE_CASES_v2.md`](USE_CASES_v2.md) lesen.**
 >
 > Erstellt: 2026-08-17 | Changelog zuletzt aktualisiert: 2026-08-17  
 > Commit-Abdeckung: `9252df7` (Erstellung) → `252fb57` (Tagesabschluss)

@@ -1,11 +1,8 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-20** (fix: Audit-Befunde Phase 1+2 — Security, Limits, RBAC, IDOR, OutboxRecovery, SKIP LOCKED, BMAD) | GitHub: https://github.com/potty32/stablecoin-integration
-> **Commit 2026-08-20 (neu):** feat: Multi-Token-Adapter-Pattern (EURAU/EURQ) + DvP Escrow Engine (UC-32–35) + V20
-> **Commit 2026-08-20:** TC-04 Fix (stablecoin_app User + V19 Grant limit_change_log + docker-compose Init-Script)
-> **Commit 2026-08-19:** `879c66b` API Rate Limiting (Token-Bucket) + systematische Test-Erweiterung
-> **Commits 2026-08-18:** `08a1eb8` Async Kafka/S3 → `930e94c` E2E Cross-Tenant → `1a516ab` Dev-Portal → `887b6f6` Docs → `f31336e` BaFin G-08–G-15
-> **Tests:** 232 | **232 bestanden** | 0 Fehler | **Flyway:** V1–V20 | **Frontend:** Angular 18 + Dev-Portal
+> Letzte Aktualisierung: **2026-08-20** (docs: Repository-Audit, Dev-Portal-Vollständigkeitsprüfung, ToDo.md konsolidiert) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commits 2026-08-20:** Phase 1+2 Audit-Fixes · Multi-Token-Adapter + DvP · Copilot Chatbot · V24 Dev-Portal-Seed · Docs-Cleanup
+> **Tests:** 238 | **238 bestanden** | 0 Fehler | **Flyway:** V1–V24 | **Frontend:** Angular 18 + Dev-Portal + Copilot
 
 ---
 
@@ -63,7 +60,7 @@ und frage mich, womit wir anfangen sollen.
 | Schicht | Technologie |
 |---|---|
 | Backend | Spring Boot 3.3.5, Java 21, Maven |
-| Datenbank | PostgreSQL 16 + Flyway (V1–V9, siehe Abschnitt 12) |
+| Datenbank | PostgreSQL 16 + Flyway (V1–V24, siehe Abschnitt 12) |
 | Frontend | Angular 18, TypeScript, Standalone Components |
 | Auth | JWT HS256, `JwtAuthFilter` (dev-mode: "dev-user" wenn kein Token) |
 | Externe APIs (Mock) | Circle (USDC/EURC), Taurus (MPC), Chainalysis (AML), n8n, ECB |
@@ -103,7 +100,7 @@ stablecoin-integration/
 │   │   ├── TenantEntityListener.java     # @PrePersist: tenant_id auto-setzen
 │   │   └── TenantAspect.java             # Guard-Layer: loggt fehlenden TenantContext
 │   ├── entity/
-│   │   ├── TransactionStatus.java    # 15 Werte (V9): +INCOMING, COMPLIANCE_PENDING,
+│   │   ├── TransactionStatus.java    # 17 Werte (V10): +INCOMING, COMPLIANCE_PENDING,
 │   │   │                             #   COMPLIANCE_APPROVED, COMPLIANCE_REJECTED
 │   │   ├── Tenant.java               # 🆕 JPA-Entity für tenant-Tabelle (V8)
 │   │   ├── YieldPosition.java        # ACTIVE → CLOSED (NEU, eigener Lebenszyklus)
@@ -188,7 +185,7 @@ stablecoin-integration/
 ## 5. Bekannte Besonderheiten & Architektur-Entscheidungen
 
 ### State Machine (B2bTransferService)
-11-wertiger `TransactionStatus` mit zentraler `transitionTo()` Methode [REQUIRES_NEW + Pessimistic Lock].
+17-wertiger `TransactionStatus` mit zentraler `transitionTo()` Methode [REQUIRES_NEW + Pessimistic Lock].
 `ALLOWED_TRANSITIONS` Map blockt ungültige Übergänge zur Laufzeit mit `IllegalStateException`.
 Alle Statuswechsel via `self.*` aufgerufen (Spring AOP Proxy für REQUIRES_NEW).
 
@@ -274,7 +271,7 @@ sudo -u postgres psql -c "CREATE DATABASE stablecoin_dev OWNER stablecoin;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE stablecoin_dev TO stablecoin;"
 sudo -u postgres psql -c "GRANT CONNECT ON DATABASE stablecoin_dev TO stablecoin_app;"
 
-# 5. Backend bauen und starten (Flyway V1-V19 läuft automatisch)
+# 5. Backend bauen und starten (Flyway V1-V24 läuft automatisch)
 cd backend
 mvn package -DskipTests -q
 SPRING_PROFILES_ACTIVE=dev nohup java -jar target/stablecoin-backend-1.0.0.jar \
@@ -369,7 +366,7 @@ sleep 15 && echo "Frontend ready" && curl -s http://localhost:4200 | head -3
 
 ## 11. Testabdeckung (Stand 2026-08-19)
 
-**Gesamt: 218 Tests | 218 bestanden | 0 Fehler | LINE: ~82% | BRANCH: ~71% | CLASS: ~95%**
+**Gesamt: 238 Tests | 238 bestanden | 0 Fehler | LINE: ~82% | BRANCH: ~71% | CLASS: ~95%**
 
 > Testlauf lokal ausgeführt am 2026-08-20 mit OpenJDK 21 + Maven 3.8.7, PostgreSQL 16 (lokal).
 > TC-04-Fehler behoben (2026-08-20): Root Cause war fehlender `stablecoin_app` PostgreSQL-User im Setup.
@@ -450,6 +447,12 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 | V16 | `V16__operational_gaps.sql` | **🆕** `phone_hash_algorithm`, `limit_change_log`, `bulk_min_success_rate`, `idempotency_expires_at` |
 | V17 | `V17__travel_rule.sql` | **🆕** `beneficiary_*` Felder, `travel_rule_enabled/threshold` in `tenant_settings` |
 | V18 | `V18__yield_year_end.sql` | **🆕** `year_end_valuation_eur/tax_event_id/last_valued_year` auf `yield_position`; `tax_event.redeem_tx_id` nullable |
+| V19 | `V19__grant_limit_change_log_to_app_user.sql` | **🔒** Fehlender GRANT für `limit_change_log` (V16 erstellt, V8-Bulk-Grant nicht erfasst) |
+| V20 | `V20__dvp_escrow_and_multi_token.sql` | **🆕** `dvp_escrow`-Tabelle + RLS + Multi-Token-Schema (UC-32–35) |
+| V21 | `V21__fix_tx_limit_single_b2b_default.sql` | **🔧** `txLimitSingleB2b` Default 25k → 500k (Audit-Fix F-02) |
+| V22 | `V22__fix_seed_tx_limits.sql` | **🔧** B2B-Seed TX-Limit 25k → 200k (ermöglicht Vier-Augen-Tests) |
+| V23 | `V23__rls_for_sensitive_tables.sql` | **🔒** `phone_alias.tenant_id` + RLS; GRANTs `approval_workflow`, `rate_quote` (Audit S-07) |
+| V24 | `V24__dev_portal_seed_data.sql` | **🆕** Dev-Portal-Testdaten: Accounts für tenant-kleine-vb, tenant-grosse-vb, Address-Book-Einträge |
 
 ---
 
@@ -506,7 +509,7 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 - ✅ G-14: PhoneHashService HMAC-SHA256 (PHONE_HMAC_KEY Env-Variable)
 - ✅ G-15: YieldYearEndService @Scheduled(31.12. 23:30)
 
-**125 Tests — 0 Failures | Flyway V1–V18 | QA_REVIEW_CHANGES.md vollständig**
+**238 Tests — 0 Failures | Flyway V1–V24 | Alle Sprints abgeschlossen**
 
 **Async Event-Driven Architecture: Kafka + S3** (neuester Commit):
 - ✅ `kafka/event/` — 4 JSON-Event-POJOs (TransferStatus, ComplianceScreening, YieldLifecycle, Analytics)

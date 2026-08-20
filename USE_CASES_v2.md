@@ -1,7 +1,7 @@
 # Use Cases — Atruvia Stablecoin Integration Platform · Version 3
 
 > **Stand: 2026-08-18 (Async Kafka + S3 Architektur)** | Commits: `68bb995` → aktuell  
-> Vollständige Dokumentation aller **34+ Use Cases** (UC-01–UC-31 + G-01–G-15 Gap-Fixes + Dev-Portal).  
+> Vollständige Dokumentation aller **36+ Use Cases** (UC-01–UC-36 + G-01–G-15 Gap-Fixes + Dev-Portal).  
 > Alle Änderungen aus Session 1–8 sind eingearbeitet.
 
 ---
@@ -1272,7 +1272,7 @@ POST /dvp/cancel {escrowId, escrowReference, cancellationReason}
 
 ## State Machine — Transaktionslebenszyklus (aktualisiert V10)
 
-### Erlaubte Zustandsübergänge (18-Werte-Enum)
+### Erlaubte Zustandsübergänge (17-Werte-Enum)
 
 ```
 ── Outbound-Pfad ────────────────────────────────────────────
@@ -1637,7 +1637,7 @@ Nutzer tippt Frage im Chat-Widget
 | Schicht | Technologie |
 |---|---|
 | Backend | Spring Boot 3.3.5, Java 21, Maven |
-| Datenbank | PostgreSQL 16 + Flyway (V1–V9) |
+| Datenbank | PostgreSQL 16 + Flyway (V1–V24) |
 | Multi-Tenancy | PostgreSQL RLS + TenantAwareDataSource + TenantContext (ThreadLocal) |
 | Frontend | Angular 18, TypeScript, Standalone Components |
 | Auth | JWT HS256, `tenant`-Claim für Mandantenidentifikation |
@@ -1645,7 +1645,7 @@ Nutzer tippt Frage im Chat-Widget
 | Externe APIs (Mock) | Circle (USDC/EURC), Taurus (MPC), Chainalysis (AML, direction param), n8n |
 | Resilienz | Resilience4j Circuit Breaker + Transactional Outbox (Crash-Recovery) |
 | Observability | OpenTelemetry Tracing, AuditLog (INSERT-only, inkl. `AML_INBOUND_BLOCK`) |
-| Tests | JUnit 5, Spring Boot Test, Testcontainers PostgreSQL 16 · **106 Tests** |
+| Tests | JUnit 5, Spring Boot Test, PostgreSQL 16 (lokal) · **238 Tests** |
 
 ## Flyway-Migrationen
 
