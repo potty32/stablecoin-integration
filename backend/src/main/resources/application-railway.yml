@@ -3,10 +3,10 @@ spring:
     activate:
       on-profile: railway
 
-  # Railway stellt DATABASE_URL bereit: postgresql://user:pass@host:port/db
-  # jdbc: Prefix hinzufügen → HikariCP liest User/Pass automatisch aus der URL
   datasource:
-    url: "jdbc:${DATABASE_URL}?sslmode=require"
+    url: jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
+    username: ${PGUSER}
+    password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
@@ -14,8 +14,10 @@ spring:
       connection-timeout: 10000
 
   flyway:
-    url: "jdbc:${DATABASE_URL}?sslmode=require"
-    # User/Password werden von Flyway aus der URL gelesen (kein separates Feld nötig)
+    url:      jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
+    user:     ${PGUSER}
+    password: ${PGPASSWORD}
+    schemas:  public
 
   jpa:
     show-sql: false
