@@ -104,7 +104,7 @@ public class B2bController {
     public ResponseEntity<TransactionResponse> getTransfer(
             @PathVariable UUID id,
             Authentication auth) {
-        return ResponseEntity.ok(transferService.getById(id));
+        return ResponseEntity.ok(transferService.getById(id, auth.getName()));
     }
 
     @PostMapping("/transfers/{id}/approve")

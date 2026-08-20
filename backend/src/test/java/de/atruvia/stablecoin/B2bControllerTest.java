@@ -201,7 +201,7 @@ class B2bControllerTest {
     @WithMockUser
     @DisplayName("TC-B2B-03a: GET /transfers/{id} — vorhanden → 200 OK")
     void getTransfer_exists_returns200() throws Exception {
-        when(transferService.getById(txId)).thenReturn(sampleTx);
+        when(transferService.getById(eq(txId), any())).thenReturn(sampleTx);
 
         mockMvc.perform(get("/api/v1/b2b/transfers/{id}", txId))
                 .andExpect(status().isOk())
@@ -213,7 +213,7 @@ class B2bControllerTest {
     @DisplayName("TC-B2B-03b: GET /transfers/{id} — nicht vorhanden → 404 NOT_FOUND_001")
     void getTransfer_notFound_returns404() throws Exception {
         UUID unknown = UUID.randomUUID();
-        when(transferService.getById(unknown))
+        when(transferService.getById(eq(unknown), any()))
                 .thenThrow(new java.util.NoSuchElementException("TX not found"));
 
         mockMvc.perform(get("/api/v1/b2b/transfers/{id}", unknown))

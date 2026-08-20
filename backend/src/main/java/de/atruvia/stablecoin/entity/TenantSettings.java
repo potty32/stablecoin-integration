@@ -40,8 +40,10 @@ public class TenantSettings {
     @Column(name = "approval_threshold_b2b", nullable = false, precision = 18, scale = 6)
     private BigDecimal approvalThresholdB2b = new BigDecimal("25000.000000");
 
+    // Absoluter Einzel-Cap (GwG §3) — muss stets > approvalThresholdB2b sein.
+    // Transaktionen zwischen Schwelle und Cap gehen durch 4-Augen-Prozess.
     @Column(name = "tx_limit_single_b2b", nullable = false, precision = 18, scale = 6)
-    private BigDecimal txLimitSingleB2b = new BigDecimal("25000.000000");
+    private BigDecimal txLimitSingleB2b = new BigDecimal("500000.000000");
 
     @Column(name = "tx_limit_daily_b2b", nullable = false, precision = 18, scale = 6)
     private BigDecimal txLimitDailyB2b = new BigDecimal("2000000.000000");

@@ -311,13 +311,13 @@ class CrossTenantInterbankenClearanceTest {
         assertThat(inboundAmountUsdc).as("Empfangener USDC-Betrag muss dem Sendebetrag entsprechen")
                                      .isEqualByComparingTo(TRANSFER_AMOUNT);
 
-        // amountFiat (EUR) = USDC-Betrag × Mock-FX-Rate (1.0823)
-        // Beispiel: 10.000 USDC × 1.0823 = 10.823 EUR (Gutschrift auf Girokonto Mandant B)
+        // FX-Korrektheit (F-01-Fix): amountFiat (EUR) = USDC-Betrag / Mock-FX-Rate (1.0823)
+        // Semantik: 1 EUR = 1.0823 USDC → 10.000 USDC / 1.0823 ≈ 9.239,44 EUR
         BigDecimal inboundAmountEur = new BigDecimal(extractField(result, "amountFiat"));
         BigDecimal mockFxRate = new BigDecimal("1.0823");
-        BigDecimal expectedEur = TRANSFER_AMOUNT.multiply(mockFxRate);
+        BigDecimal expectedEur = TRANSFER_AMOUNT.divide(mockFxRate, 6, java.math.RoundingMode.HALF_UP);
         BigDecimal delta = inboundAmountEur.subtract(expectedEur).abs();
-        assertThat(delta).as("Inbound EUR-Betrag muss FX-konvertiertem USDC-Betrag entsprechen (±50 EUR)")
+        assertThat(delta).as("Inbound EUR-Betrag = USDC / FX-Rate (korrekte Richtung, ±50 EUR Toleranz)")
                          .isLessThanOrEqualTo(new BigDecimal("50"));
 
         // Blockchain-Hash muss im Response stehen

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -28,17 +29,21 @@ public class DevAuthController {
     @GetMapping("/dev-token")
     public ResponseEntity<Map<String, String>> getDevToken(
             @RequestParam String customerId,
-            @RequestParam(defaultValue = "tenant-default") String tenant) {
+            @RequestParam(defaultValue = "tenant-default") String tenant,
+            @RequestParam(defaultValue = "false") boolean admin) {
 
         long now = System.currentTimeMillis();
         long expiry = now + 86_400_000L; // 24h
 
+        List<String> roles = admin ? List.of("ATRUVIA_ADMIN") : List.of();
+
         String token = Jwts.builder()
                 .subject(customerId)
                 .claim("tenant", tenant)
+                .claim("roles", roles)
                 .issuedAt(new Date(now))
                 .expiration(new Date(expiry))
-                .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes()))
+                .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
                 .compact();
 
         return ResponseEntity.ok(Map.of("token", token, "tenant", tenant, "customerId", customerId));

@@ -210,8 +210,10 @@ public class InboundProcessingService {
             }
 
             // LOW/MEDIUM-Risk + aktives Konto: FX-Konvertierung + Core-Banking-Gutschrift
+            // FX-Semantik: getBaseRate(USDC) liefert EUR/USD (Preis von 1 EUR in USDC, z.B. 1.0823).
+            // Inbound: X USDC → EUR = X / rate  (nicht ×, sonst 17 % Überkreditierung)
             BigDecimal baseRate = fxRateService.getBaseRate(currency);
-            BigDecimal amountEur = amountFiat.multiply(baseRate).setScale(6, RoundingMode.HALF_UP);
+            BigDecimal amountEur = amountFiat.divide(baseRate, 6, RoundingMode.HALF_UP);
 
             coreBankingClient.createLedgerBooking(new LedgerBookingDto(
                     txId.toString(),

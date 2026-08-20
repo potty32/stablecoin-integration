@@ -195,9 +195,14 @@ public class B2bTransferService {
         return toResponse(tx, false);
     }
 
-    public TransactionResponse getById(UUID id) {
+    public TransactionResponse getById(UUID id, String customerId) {
         StablecoinTransaction tx = txRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Transaction not found: " + id));
+        // S-03: Intra-Tenant-Ownership-Check (RLS schützt Cross-Tenant, nicht Cross-Customer)
+        if (!tx.getCustomerAccount().getCustomerId().equals(customerId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Access denied: transaction " + id + " does not belong to customer " + customerId);
+        }
         boolean requiresApproval = approvalRepository.findByTransactionId(id).isPresent();
         return toResponse(tx, requiresApproval);
     }
@@ -439,6 +444,23 @@ public class B2bTransferService {
                 String.format("{\"amount\":\"%s\",\"currency\":\"%s\"}", request.amountEur(), request.currency()));
         saveTransitionLog(savedTx.getId(), null, CREATED, initiatorId,
                 "Transfer initiiert: " + request.amountEur() + " EUR " + request.currency());
+
+        // G-08 / F-02: Einzeltransaktion-Limit (GwG §3, PSD2) — vor TX-Persist prüfen
+        BigDecimal singleLimit = limitResolver.resolveSingleLimit(account, settings);
+        if (request.amountEur().compareTo(singleLimit) > 0) {
+            throw new TaurusLimitExceededException(
+                    "LIMIT_001: Einzeltransaktion überschreitet das konfigurierte Limit von " + singleLimit + " EUR");
+        }
+
+        // G-08 / F-03: Tageslimit (kumulativ für den laufenden Kalendertag)
+        BigDecimal dailyLimit = limitResolver.resolveDailyLimit(account, settings);
+        BigDecimal dailyUsed = txRepository.sumOutboundAmountToday(
+                account.getId(), java.time.LocalDate.now().atStartOfDay());
+        if (dailyUsed == null) dailyUsed = BigDecimal.ZERO;
+        if (dailyUsed.add(request.amountEur()).compareTo(dailyLimit) > 0) {
+            throw new TaurusLimitExceededException(
+                    "LIMIT_002: Tageslimit von " + dailyLimit + " EUR überschritten (heute bereits " + dailyUsed + " EUR)");
+        }
 
         // G-08: Vier-Augen-Schwelle via LimitResolver (Hierarchie: TenantSettings, kein Kundenoverride)
         BigDecimal approvalThreshold = limitResolver.resolveApprovalThreshold(settings);

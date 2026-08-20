@@ -58,6 +58,10 @@ class OutboxProcessorTest {
                 circleWalletClient, revenueService, adminJdbcTemplate);
         ReflectionTestUtils.setField(processor, "transferService", transferService);
         ReflectionTestUtils.setField(processor, "inboundProcessingService", inboundProcessingService);
+        // T-01-Fix: adminJdbcTemplate.queryForList() liefert Tenant-ID für BYPASSRLS-Lookup
+        // Varargs-kompatibles Mockito-Matching (Object... args)
+        when(adminJdbcTemplate.queryForList(anyString(), eq(String.class), (Object[]) any()))
+                .thenReturn(List.of("tenant-default"));
     }
 
     @AfterEach

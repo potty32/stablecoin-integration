@@ -193,34 +193,50 @@ public class OutboxProcessor {
      */
     private void recoverSubmitToBlockchain(OutboxMessage msg) {
         UUID txId = msg.getTransactionId();
-        StablecoinTransaction tx = txRepository.findById(txId).orElse(null);
 
-        if (tx == null) {
-            log.warn("[RECOVERY] TX {} nicht in DB gefunden — Outbox-Nachricht wird als SENT markiert", txId);
+        // T-01-Fix: TenantContext muss für die gesamte Recovery gesetzt bleiben.
+        // Der Outbox-Scheduler hat keinen JWT-Kontext → TenantContext ist leer → RLS filtert alle Zeilen.
+        // Lösung: tenant_id via adminJdbcTemplate (BYPASSRLS = stablecoin Table-Owner) ermitteln,
+        // dann TenantContext für alle nachfolgenden Repository- und Service-Aufrufe (REQUIRES_NEW) setzen.
+        String tenantId = lookupTenantIdBypassRls(txId);
+        if (tenantId == null) {
+            log.warn("[RECOVERY] TX {} nicht via BYPASSRLS gefunden — Outbox-Nachricht wird als SENT markiert", txId);
             return;
         }
+        TenantContext.set(tenantId);
+        try {
+            StablecoinTransaction tx = txRepository.findById(txId).orElse(null);
 
-        TransactionStatus status = tx.getStatus();
-        log.info("[RECOVERY] Prüfe TX={} status={}", txId, status);
-
-        switch (status) {
-            case SETTLED, FAILED, REJECTED, EXPIRED, REDEEMED -> {
-                log.info("[RECOVERY] TX {} bereits in Endzustand {} — keine Recovery nötig", txId, status);
+            if (tx == null) {
+                log.warn("[RECOVERY] TX {} nicht in DB gefunden (tenantId={}) — Outbox-Nachricht wird als SENT markiert",
+                        txId, tenantId);
+                return;
             }
-            case SUBMITTED -> {
-                if (tx.getCircleTransactionId() != null) {
-                    recoverFromCircle(tx);
-                } else {
-                    log.error("[RECOVERY] TX {} ist SUBMITTED aber hat keine circleTransactionId — manueller Eingriff erforderlich!", txId);
-                    throw new IllegalStateException("SUBMITTED ohne circleTransactionId: " + txId);
+
+            TransactionStatus status = tx.getStatus();
+            log.info("[RECOVERY] Prüfe TX={} status={} tenantId={}", txId, status, tenantId);
+
+            switch (status) {
+                case SETTLED, FAILED, REJECTED, EXPIRED, REDEEMED -> {
+                    log.info("[RECOVERY] TX {} bereits in Endzustand {} — keine Recovery nötig", txId, status);
                 }
+                case SUBMITTED -> {
+                    if (tx.getCircleTransactionId() != null) {
+                        recoverFromCircle(tx);
+                    } else {
+                        log.error("[RECOVERY] TX {} ist SUBMITTED aber hat keine circleTransactionId — manueller Eingriff erforderlich!", txId);
+                        throw new IllegalStateException("SUBMITTED ohne circleTransactionId: " + txId);
+                    }
+                }
+                case FUNDS_HELD -> {
+                    log.error("[RECOVERY] TX {} steckt in FUNDS_HELD — Circle wurde noch nicht aufgerufen. " +
+                            "Hold={} ist aktiv. Manueller Eingriff erforderlich!", txId, tx.getHoldId());
+                    throw new IllegalStateException("TX stuck in FUNDS_HELD: " + txId);
+                }
+                default -> log.warn("[RECOVERY] Unerwarteter Status {} für TX={}", status, txId);
             }
-            case FUNDS_HELD -> {
-                log.error("[RECOVERY] TX {} steckt in FUNDS_HELD — Circle wurde noch nicht aufgerufen. " +
-                        "Hold={} ist aktiv. Manueller Eingriff erforderlich!", txId, tx.getHoldId());
-                throw new IllegalStateException("TX stuck in FUNDS_HELD: " + txId);
-            }
-            default -> log.warn("[RECOVERY] Unerwarteter Status {} für TX={}", status, txId);
+        } finally {
+            TenantContext.clear();
         }
     }
 

@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -47,7 +48,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         if (devMode && (authHeader == null || authHeader.isBlank())) {
             // Dev-Modus: ohne Token mit Default-Mandant durchlassen
-            setAuthentication("dev-user");
+            setAuthentication("dev-user", null);
             TenantContext.set("tenant-default");
             try {
                 chain.doFilter(request, response);
@@ -68,9 +69,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
                 String userId = claims.getSubject();
                 String tenantId = claims.get("tenant", String.class);
+                @SuppressWarnings("unchecked")
+                List<String> roles = claims.get("roles", List.class);
                 MDC.put("userId", userId);
                 MDC.put("tenantId", tenantId != null ? tenantId : "tenant-default");
-                setAuthentication(userId);
+                setAuthentication(userId, roles);
                 TenantContext.set(tenantId != null ? tenantId : "tenant-default");
             } catch (Exception e) {
                 log.warn("[JWT] Invalid token: {}", e.getMessage());
@@ -87,10 +90,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
     }
 
-    private void setAuthentication(String userId) {
-        var auth = new UsernamePasswordAuthenticationToken(
-                userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))
-        );
+    private void setAuthentication(String userId, List<String> roles) {
+        List<GrantedAuthority> authorities = new java.util.ArrayList<>();
+        authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+        if (roles != null) {
+            roles.stream()
+                 .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                 .forEach(authorities::add);
+        }
+        var auth = new UsernamePasswordAuthenticationToken(userId, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(auth);
     }
 }

@@ -51,6 +51,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/v1/b2b/admin/**").hasRole("ATRUVIA_ADMIN")
                         .requestMatchers(
                                 "/actuator/health",
                                 "/actuator/info",

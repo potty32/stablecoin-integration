@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import jakarta.persistence.LockModeType;
+import java.math.BigDecimal;
 import java.util.Collection;
 
 import java.time.LocalDateTime;
@@ -49,4 +50,24 @@ public interface StablecoinTransactionRepository extends JpaRepository<Stablecoi
     Optional<StablecoinTransaction> findByBlockchainHash(String blockchainHash);
 
     List<StablecoinTransaction> findByStatusIn(Collection<TransactionStatus> statuses);
+
+    /**
+     * G-08/F-02: Tages-Aggregat für Daily-Limit-Prüfung (GwG §3, PSD2).
+     * Zählt alle nicht-terminal-fehlgeschlagenen OUTBOUND-Transaktionen des Tages.
+     * Terminal-Failed: FAILED, REJECTED, EXPIRED, RETURNED → nicht im Limit.
+     */
+    @Query("""
+           SELECT COALESCE(SUM(t.amountFiat), 0) FROM StablecoinTransaction t
+           WHERE t.customerAccount.id = :accountId
+             AND t.type = de.atruvia.stablecoin.entity.TransactionType.OUTBOUND
+             AND t.createdAt >= :startOfDay
+             AND t.status NOT IN (
+                 de.atruvia.stablecoin.entity.TransactionStatus.FAILED,
+                 de.atruvia.stablecoin.entity.TransactionStatus.REJECTED,
+                 de.atruvia.stablecoin.entity.TransactionStatus.EXPIRED,
+                 de.atruvia.stablecoin.entity.TransactionStatus.RETURNED
+             )
+           """)
+    BigDecimal sumOutboundAmountToday(@Param("accountId") UUID accountId,
+                                      @Param("startOfDay") LocalDateTime startOfDay);
 }
