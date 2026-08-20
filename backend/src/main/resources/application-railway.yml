@@ -1,0 +1,55 @@
+spring:
+  config:
+    activate:
+      on-profile: railway
+
+  # PostgreSQL via Railway-Umgebungsvariablen
+  datasource:
+    url: jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
+    username: ${PGUSER}
+    password: ${PGPASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5      # PostgreSQL Hobby-Plan: max 5 Connections
+      minimum-idle: 1
+      connection-timeout: 10000
+
+  flyway:
+    url:      jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
+    user:     ${PGUSER}
+    password: ${PGPASSWORD}
+    schemas:  public
+
+  jpa:
+    show-sql: false
+
+# Server-Port aus Railway-Env (Standard: 8080)
+server:
+  port: ${PORT:8080}
+
+# Logging: minimal auf Railway
+logging:
+  level:
+    root: WARN
+    de.atruvia.stablecoin: INFO
+
+app:
+  security:
+    # JWT-Secret aus Railway-Variable (mind. 32 Zeichen)
+    jwt-secret: ${JWT_SECRET}
+    jwt-expiration-ms: 86400000
+    # Dev-Mode: Mocks für Circle, Taurus, Chainalysis aktiv — kein echter API-Key nötig
+    dev-mode: true
+    phone-hmac-key: ${PHONE_HMAC_KEY:railway-phone-hmac-placeholder-32-bytes}
+  webhook:
+    circle-secret: ${CIRCLE_WEBHOOK_SECRET:railway-webhook-placeholder}
+
+# Actuator: nur Health (kein Metrics-Leak)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

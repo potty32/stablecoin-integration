@@ -1,40 +1,25 @@
-[[services]]
-name = "stablecoin-backend"
-source = "backend"
+# ═══════════════════════════════════════════════════════════════════════════
+# Railway Deployment — Single-Container (Angular + Spring Boot)
+# Ziel: max. 10 parallele Demo-User, minimale Kosten
+# ═══════════════════════════════════════════════════════════════════════════
 
-[services.build]
-buildCommand = "mvn clean package -DskipTests"
-startCommand = "java -jar target/stablecoin-backend-1.0.0.jar"
-# Maven-Build inkl. Abhängigkeiten: 10 Minuten Timeout
-buildTimeout = 600
+[build]
+builder         = "DOCKERFILE"
+dockerfilePath  = "Dockerfile"
 
-[services.deploy]
-healthcheckPath = "/actuator/health"
-healthcheckTimeout = 60
-# Zero-Downtime: Railway wartet auf /actuator/health=UP bevor Traffic umgeleitet wird
-restartPolicyType = "ON_FAILURE"
+[deploy]
+startCommand            = "java $JAVA_OPTS -jar app.jar"
+healthcheckPath         = "/actuator/health"
+healthcheckTimeout      = 120
+restartPolicyType       = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
-# Pflicht-Umgebungsvariablen (in Railway Dashboard setzen):
-# DATABASE_URL         — jdbc:postgresql://<host>:5432/stablecoin
-# DATABASE_USERNAME    — DB-Benutzername
-# DATABASE_PASSWORD    — DB-Passwort
-# JWT_SECRET           — HS256-Schlüssel (mind. 32 Zeichen)
-# CIRCLE_API_KEY       — Circle API Key
-# CIRCLE_MASTER_WALLET_ID — Circle Wallet UUID
-# TAURUS_API_KEY       — Taurus Custody API Key
-# TAURUS_BASE_URL      — Taurus API Basis-URL
-# CHAINALYSIS_API_KEY  — Chainalysis API Key
-# CORE_BANKING_BASE_URL — Kernbank-API-URL
-# CORE_BANKING_API_KEY — Kernbank-API-Key
-# N8N_WEBHOOK_URL      — n8n Settlement-Webhook-URL
-# Vollständige Liste: siehe .env.example
-
-[[services]]
-name = "stablecoin-frontend"
-source = "frontend"
-
-[services.build]
-buildCommand = "npm ci && npm run build"
-startCommand = "npx serve dist/stablecoin-frontend -l $PORT --single"
-buildTimeout = 300
+# ── Pflicht-Umgebungsvariablen (Railway Dashboard → Variables) ─────────────
+# SPRING_PROFILES_ACTIVE  = railway
+# PGHOST     → Reference auf Railway PostgreSQL Plugin
+# PGPORT     → Reference auf Railway PostgreSQL Plugin
+# PGDATABASE → Reference auf Railway PostgreSQL Plugin
+# PGUSER     → Reference auf Railway PostgreSQL Plugin
+# PGPASSWORD → Reference auf Railway PostgreSQL Plugin
+# JWT_SECRET → min. 32 Zeichen (beliebig, für HS256-Signing)
+# PORT       = 8080

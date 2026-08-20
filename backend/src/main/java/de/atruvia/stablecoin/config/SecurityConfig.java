@@ -53,6 +53,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/b2b/admin/**").hasRole("ATRUVIA_ADMIN")
                         .requestMatchers(
+                                // Angular SPA: statische Ressourcen und Deep-Links öffentlich
+                                "/", "/index.html", "/*.js", "/*.css", "/*.ico", "/*.png",
+                                "/assets/**", "/chunk-*.js", "/main-*.js", "/styles-*.css",
+                                "/polyfills-*.js", "/runtime-*.js", "/media/**",
+                                // Backend-Endpunkte
                                 "/actuator/health",
                                 "/actuator/info",
                                 "/api-docs/**",
