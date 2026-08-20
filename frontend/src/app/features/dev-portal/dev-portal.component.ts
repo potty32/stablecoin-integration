@@ -328,7 +328,7 @@ interface Tab {
                         margin-bottom:0.2rem;gap:0.5rem;">
               <span style="font-size:0.7rem;color:#64748b;flex-shrink:0;">{{ d.label }}</span>
               <span style="font-size:0.7rem;color:#22c55e;font-family:monospace;text-align:right;
-                           word-break:break-all;">{{ d.value }}</span>
+                           word-break:break-all;">{{ resolveTestDataDisplay(d) }}</span>
             </div>
           </div>
 
@@ -668,7 +668,7 @@ export class DevPortalComponent implements OnInit {
   webhookLoading = false;
   webhookResult: { ok: boolean; text: string } | null = null;
   webhook = {
-    walletId: '0xBankB2BWallet000000000000000000000000001',
+    walletId: '0xA100000000000000000000000000000000000001',
     amount: 1000,
     currency: 'USDC',
     senderWallet: '0xA100000000000000000000000000000000000001',
@@ -928,7 +928,7 @@ export class DevPortalComponent implements OnInit {
           id: 'UC-31', emoji: '🗳️', title: 'Sammelkonto (Unzuordenbare Eingänge)', requiredType: 'ANY',
           description: 'Unbekannte Wallet-Adresse → TX landet auf Sammelkonto (customer_id=unassigned-funds). Sachbearbeiter ordnet manuell zu.',
           testData: [
-            { label: 'Unbekannte Wallet', value: '0xUNKNOWN0000000000000000000000000000001' },
+            { label: 'Unbekannte Wallet', value: '0xCC00000000000000000000000000000000000001' },
             { label: 'Sammelkonto-IBAN', value: 'SYSTEM-COLLECTION-0000000000000000' },
             { label: 'Admin-Reassign', value: 'POST /admin/reassign-transaction' }
           ],
@@ -1256,6 +1256,15 @@ export class DevPortalComponent implements OnInit {
   }
 
   // ── Direkt-Start ──────────────────────────────────────────────────────────────
+
+  /** Zeigt in der Karte dynamisch die IBAN des eingeloggten Nutzers statt eines Platzhalters. */
+  resolveTestDataDisplay(d: TestDatum): string {
+    const ibanLabels = ['Quell-IBAN', 'Quelle', 'Sender-IBAN', 'IBAN'];
+    if (ibanLabels.includes(d.label) && this.currentUser?.iban) {
+      return this.currentUser.iban;
+    }
+    return d.value;
+  }
 
   directStart(uc: PlaybookEntry) {
     if (!this.currentUser) {
