@@ -683,11 +683,11 @@ export class DevPortalComponent implements OnInit {
   ];
 
   readonly users: UserProfile[] = [
-    { customerId: 'cust-b2b-001', name: 'Müller GmbH', role: 'Initiator/Admin', iban: 'DE89370400440532013000', type: 'B2B', tenantId: 'tenant-kleine-vb' },
-    { customerId: 'cust-b2b-approver', name: 'Schmidt AG', role: 'Zweitfreigeber', iban: 'DE89370400440532013000', type: 'B2B', tenantId: 'tenant-kleine-vb' },
-    { customerId: 'cust-b2b-001', name: 'Müller GmbH (Metro)', role: 'Initiator', iban: 'DE89370400440532013000', type: 'B2B', tenantId: 'tenant-grosse-vb' },
-    { customerId: 'cust-b2c-001', name: 'Max Mustermann', role: 'Privatkunde', iban: 'DE27200400600532013001', type: 'B2C', tenantId: 'tenant-kleine-vb' },
-    { customerId: 'cust-b2c-001', name: 'Mustermann (Metro)', role: 'Privatkunde', iban: 'DE27200400600532013001', type: 'B2C', tenantId: 'tenant-grosse-vb' }
+    { customerId: 'cust-b2b-001',      name: 'Müller GmbH',         role: 'Initiator/Admin', iban: 'DE89370400440532013010', type: 'B2B', tenantId: 'tenant-kleine-vb' },
+    { customerId: 'cust-b2b-approver', name: 'Schmidt AG',           role: 'Zweitfreigeber',  iban: 'DE89370400440532013011', type: 'B2B', tenantId: 'tenant-kleine-vb' },
+    { customerId: 'cust-b2b-001',      name: 'Müller GmbH (Metro)',  role: 'Initiator',       iban: 'DE89370400440532013020', type: 'B2B', tenantId: 'tenant-grosse-vb' },
+    { customerId: 'cust-b2c-001',      name: 'Max Mustermann',       role: 'Privatkunde',     iban: 'DE27200400600532013010', type: 'B2C', tenantId: 'tenant-kleine-vb' },
+    { customerId: 'cust-b2c-001',      name: 'Mustermann (Metro)',   role: 'Privatkunde',     iban: 'DE27200400600532013020', type: 'B2C', tenantId: 'tenant-grosse-vb' }
   ];
 
   get filteredUsers(): UserProfile[] {
@@ -1263,10 +1263,19 @@ export class DevPortalComponent implements OnInit {
       return;
     }
 
+    // IBAN-Platzhalter durch die tatsächliche IBAN des eingeloggten Nutzers ersetzen.
+    // Hintergrund: Die testData-Einträge enthalten generische Demo-IBANs;
+    // der eingeloggte Tenant hat aber mandantenspezifische IBANs aus V24-Seed.
+    const ibanLabels = ['Quell-IBAN', 'Quelle', 'Sender-IBAN', 'IBAN'];
+    const userIban = this.currentUser.iban;
+    const resolvedTestData = uc.testData.map(d =>
+      (ibanLabels.includes(d.label) && userIban) ? { ...d, value: userIban } : d
+    );
+
     // Prefill-Daten in sessionStorage speichern
     const prefill = {
       ucId: uc.id,
-      testData: Object.fromEntries(uc.testData.map(d => [d.label, d.value]))
+      testData: Object.fromEntries(resolvedTestData.map(d => [d.label, d.value]))
     };
     sessionStorage.setItem('playbook_prefill', JSON.stringify(prefill));
 
