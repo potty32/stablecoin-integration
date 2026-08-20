@@ -22,7 +22,7 @@ import { AuthService } from '../../../core/services/auth.service';
 
         <div>
           <label class="field-label">Quell-IBAN</label>
-          <input formControlName="sourceIban" type="text" placeholder="DE89370400440532013000" class="field-input"
+          <input formControlName="sourceIban" type="text" placeholder="IBAN des eingeloggten Mandanten" class="field-input"
                  style="width:100%;padding:0.5rem 0.75rem;border:1px solid #e2e8f0;border-radius:6px;font-size:0.875rem">
           @if (form.get('sourceIban')?.invalid && form.get('sourceIban')?.touched) {
             <span style="color:#dc2626;font-size:0.75rem">Pflichtfeld</span>
