@@ -20,7 +20,7 @@ WORKDIR /app/backend
 
 # Angular-Output (browser/) als Spring Boot Static Resources injizieren.
 # Spring Boot serviert /static/** automatisch unter / — kein Nginx nötig.
-COPY --from=frontend-build /app/frontend/dist/stablecoin-frontend/browser/ \
+COPY --from=frontend-build /app/frontend/dist/browser/ \
      /app/backend/src/main/resources/static/
 
 COPY backend/pom.xml ./
