@@ -487,7 +487,8 @@ public class B2bTransferService {
                 .orElseThrow(() -> new NoSuchElementException("Approval workflow not found: " + transactionId));
 
         if (workflow.getStatus() != ApprovalStatus.PENDING_APPROVAL) {
-            throw new IllegalStateException("Not pending: " + workflow.getStatus());
+            // T-07-Fix: Race-Condition gibt 409 Conflict statt 500 IllegalStateException
+            throw new de.atruvia.stablecoin.exception.IdempotencyConflictException(transactionId);
         }
         if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
             throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
@@ -632,6 +633,13 @@ public class B2bTransferService {
             // G-01: Brutto-Modell — Transit erhält vollen Sendebetrag, Ertragskonto die Gebühren
             BigDecimal totalGross  = tx.getGrossDebit() != null ? tx.getGrossDebit() : tx.getAmountFiat();
             BigDecimal revenueAmt  = totalGross.subtract(tx.getAmountFiat()).max(revenue.grossRevenue());
+
+            // T-02-Fix: LEDGER_BOOKING_INTENT VORHER persistieren (REQUIRES_NEW → eigener Commit).
+            // Crash nach createLedgerBooking aber vor persistLedgerRef hinterlässt einen Intent,
+            // der beim OutboxProcessor-Recovery für den Storno-Lookup genutzt werden kann.
+            saveOutboxMessage(txId, "LEDGER_BOOKING_INTENT",
+                    String.format("{\"txId\":\"%s\",\"grossDebit\":\"%s\"}", txId, totalGross));
+
             BookingResponseDto booking = coreBankingClient.createLedgerBooking(new LedgerBookingDto(
                     txId.toString(), tx.getCustomerAccount().getIban(),
                     List.of(

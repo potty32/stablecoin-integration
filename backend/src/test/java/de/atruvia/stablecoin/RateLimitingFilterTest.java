@@ -60,27 +60,26 @@ class RateLimitingFilterTest {
     }
 
     @Test
-    @DisplayName("TC-RL-02: IP-Limit — X-Forwarded-For-Header wird ausgewertet")
-    void ipRateLimit_xForwardedFor_usedAsClientIp() throws Exception {
-        // Gleiche forwarded IP → gleicher Bucket
+    @DisplayName("TC-RL-02: S-04-Fix — X-Forwarded-For ohne Trusted-Proxy-Config wird ignoriert")
+    void ipRateLimit_xForwardedFor_ignoredWithoutTrustedProxy() throws Exception {
+        // S-04-Fix: Ohne konfiguriertes trustedProxyCidr wird XFF ignoriert.
+        // Jeder remoteAddr zählt als eigener Client → kein gemeinsamer Bucket → kein 429.
         MockHttpServletRequest request1 = new MockHttpServletRequest("GET", "/api/v1/b2b/inbound/webhook");
-        request1.setRemoteAddr("192.168.1.1");
-        request1.addHeader("X-Forwarded-For", "203.0.113.42");
+        request1.setRemoteAddr("10.0.0.1");
+        request1.addHeader("X-Forwarded-For", "203.0.113.42");  // böswilliger Spoofing-Versuch
 
         MockHttpServletRequest request2 = new MockHttpServletRequest("GET", "/api/v1/b2b/inbound/webhook");
-        request2.setRemoteAddr("192.168.1.2");   // Anderer Proxy
-        request2.addHeader("X-Forwarded-For", "203.0.113.42");  // Gleicher Client
+        request2.setRemoteAddr("10.0.0.2");
+        request2.addHeader("X-Forwarded-For", "203.0.113.42");
 
-        filter.doFilter(request1, new MockHttpServletResponse(), new MockFilterChain());
-        filter.doFilter(request2, new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletResponse response1 = new MockHttpServletResponse();
+        MockHttpServletResponse response2 = new MockHttpServletResponse();
+        filter.doFilter(request1, response1, new MockFilterChain());
+        filter.doFilter(request2, response2, new MockFilterChain());
 
-        // Dritte Anfrage desselben Clients → 429
-        MockHttpServletResponse response3 = new MockHttpServletResponse();
-        MockHttpServletRequest request3 = new MockHttpServletRequest("GET", "/api/v1/b2b/inbound/webhook");
-        request3.setRemoteAddr("192.168.1.3");
-        request3.addHeader("X-Forwarded-For", "203.0.113.42");
-        filter.doFilter(request3, response3, new MockFilterChain());
-        assertThat(response3.getStatus()).isEqualTo(429);
+        // Jeder remoteAddr hat seinen eigenen Bucket → kein 429 (nur 1 Request pro IP)
+        assertThat(response1.getStatus()).isNotEqualTo(429);
+        assertThat(response2.getStatus()).isNotEqualTo(429);
     }
 
     // ─── TC-RL-03: Tenant-basiertes Rate Limiting ─────────────────────────────

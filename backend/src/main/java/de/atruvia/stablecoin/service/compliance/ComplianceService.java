@@ -30,8 +30,16 @@ public class ComplianceService {
     @CircuitBreaker(name = "chainalysis", fallbackMethod = "screenAddressFallback")
     @Transactional
     public void screenAndAssert(String walletAddress, UUID transactionId, String userId, String direction) {
+        screenAndAssert(walletAddress, transactionId, userId, direction, "USDC", "POLYGON");
+    }
+
+    // F-05-Fix: Overload mit expliziter Currency + Network (verhindert falsche Chainalysis-Einordnung)
+    @CircuitBreaker(name = "chainalysis", fallbackMethod = "screenAddressFallbackFull")
+    @Transactional
+    public void screenAndAssert(String walletAddress, UUID transactionId, String userId,
+                                String direction, String asset, String network) {
         AddressScreenResponseDto result = chainalysisClient.screenAddress(
-                new AddressScreenRequestDto(walletAddress, "USDC", "POLYGON", direction)
+                new AddressScreenRequestDto(walletAddress, asset, network, direction)
         );
 
         AuditLog entry = new AuditLog();
@@ -84,5 +92,10 @@ public class ComplianceService {
         auditLogRepository.save(entry);
 
         throw new ComplianceBlockException(walletAddress, "UNAVAILABLE");
+    }
+
+    private void screenAddressFallbackFull(String walletAddress, UUID transactionId, String userId,
+                                           String direction, String asset, String network, Throwable ex) {
+        screenAddressFallback(walletAddress, transactionId, userId, direction, ex);
     }
 }

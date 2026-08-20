@@ -28,8 +28,18 @@ public class PhoneHashService {
     private static final Logger log = LoggerFactory.getLogger(PhoneHashService.class);
     private static final String ALGORITHM = "HmacSHA256";
 
-    @Value("${app.security.phone-hmac-key:atruvia-stablecoin-2026}")
+    @Value("${app.security.phone-hmac-key}")
     private String hmacKey;
+
+    // S-05-Fix: Startup-Guard — verhindert Betrieb mit bekanntem Default-Key
+    @jakarta.annotation.PostConstruct
+    void validateHmacKey() {
+        if ("__PHONE_HMAC_KEY_NOT_SET__".equals(hmacKey) || hmacKey == null || hmacKey.isBlank()) {
+            throw new IllegalStateException(
+                "[SICHERHEIT] PHONE_HMAC_KEY ist nicht gesetzt. " +
+                "Umgebungsvariable PHONE_HMAC_KEY mit mind. 32 zufälligen Bytes (hex) setzen.");
+        }
+    }
 
     /**
      * Berechnet einen deterministischen HMAC-SHA256-Hash der normalisierten Telefonnummer.

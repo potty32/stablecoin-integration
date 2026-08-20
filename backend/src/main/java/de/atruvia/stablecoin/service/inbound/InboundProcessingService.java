@@ -352,6 +352,19 @@ public class InboundProcessingService {
             tx.setStatus(UNASSIGNED);
             StablecoinTransaction saved = txRepository.save(tx);
 
+            // F-08-Fix: AML-Screening NACH TX-Erstellung (GwG §10 — CDD bei Empfang)
+            // tx.getId() ist jetzt bekannt → korrekte FK in audit_log.
+            try {
+                complianceService.screenAndAssert(
+                        request.senderWallet(), saved.getId(), "SYSTEM", "incoming");
+            } catch (de.atruvia.stablecoin.exception.ComplianceBlockException e) {
+                log.warn("[UNASSIGNED-AML] Sanktionierte Wallet {} — Sammelkonto-TX {} auf FAILED gesetzt",
+                        request.senderWallet(), saved.getId());
+                saved.setStatus(FAILED);
+                txRepository.save(saved);
+                return buildResponse(saved);  // Webhook antwortet trotzdem 201 (Idempotenz)
+            }
+
             AuditLog logEntry = new AuditLog();
             logEntry.setTransactionId(saved.getId());
             logEntry.setEntityType("StablecoinTransaction");

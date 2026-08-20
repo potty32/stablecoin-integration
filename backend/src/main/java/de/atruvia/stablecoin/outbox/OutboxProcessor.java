@@ -12,6 +12,7 @@ import de.atruvia.stablecoin.entity.TransactionStatus;
 import de.atruvia.stablecoin.repository.OutboxMessageRepository;
 import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
 import de.atruvia.stablecoin.service.b2b.B2bTransferService;
+import de.atruvia.stablecoin.service.b2b.KillSwitchService;
 import de.atruvia.stablecoin.service.inbound.InboundProcessingService;
 import de.atruvia.stablecoin.service.revenue.RevenueService;
 import org.slf4j.Logger;
@@ -49,6 +50,7 @@ public class OutboxProcessor {
      * bevor TenantContext gesetzt wird, damit txRepository (RLS-User) korrekt filtert.
      */
     private final JdbcTemplate adminJdbcTemplate;
+    private final KillSwitchService killSwitchService;
 
     @Lazy @Autowired
     private B2bTransferService transferService;
@@ -62,18 +64,25 @@ public class OutboxProcessor {
             StablecoinTransactionRepository txRepository,
             CircleWalletClient circleWalletClient,
             RevenueService revenueService,
-            @Qualifier("adminJdbcTemplate") JdbcTemplate adminJdbcTemplate) {
+            @Qualifier("adminJdbcTemplate") JdbcTemplate adminJdbcTemplate,
+            KillSwitchService killSwitchService) {
         this.outboxRepository = outboxRepository;
         this.n8nWebhookClient = n8nWebhookClient;
         this.txRepository = txRepository;
         this.circleWalletClient = circleWalletClient;
         this.revenueService = revenueService;
         this.adminJdbcTemplate = adminJdbcTemplate;
+        this.killSwitchService = killSwitchService;
     }
 
     @Scheduled(fixedDelay = 5000)
     @Transactional
     public void processPendingMessages() {
+        // F-07-Fix: Kill-Switch stoppt auch den Outbox-Processor (HTTP-Filter reicht nicht)
+        if (killSwitchService.isGlobalKillSwitchActive()) {
+            log.debug("[OUTBOX] Kill-Switch aktiv — Outbox-Verarbeitung pausiert");
+            return;
+        }
         List<OutboxMessage> pending = outboxRepository.findByStatusOrderByCreatedAtAsc(
                 OutboxStatus.PENDING, PageRequest.of(0, BATCH_SIZE)
         );

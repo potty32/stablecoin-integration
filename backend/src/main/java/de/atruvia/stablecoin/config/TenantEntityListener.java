@@ -4,6 +4,7 @@ import de.atruvia.stablecoin.entity.AddressBook;
 import de.atruvia.stablecoin.entity.AuditLog;
 import de.atruvia.stablecoin.entity.CustomerAccount;
 import de.atruvia.stablecoin.entity.DvpEscrow;
+import de.atruvia.stablecoin.entity.PhoneAlias;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
 import de.atruvia.stablecoin.entity.LimitChangeLog;
 import de.atruvia.stablecoin.entity.TaxEvent;
@@ -35,6 +36,8 @@ public class TenantEntityListener {
             if (te.getTenantId() == null) te.setTenantId(tenantId);
         } else if (entity instanceof DvpEscrow de) {
             if (de.getTenantId() == null) de.setTenantId(tenantId);
+        } else if (entity instanceof PhoneAlias pa) {
+            if (pa.getTenantId() == null) pa.setTenantId(tenantId);
         } else if (entity instanceof LimitChangeLog lcl) {
             if (lcl.getTenantId() == null) lcl.setTenantId(tenantId);
         }

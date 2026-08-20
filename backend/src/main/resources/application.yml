@@ -45,4 +45,4 @@ app:
     alert-threshold-minutes: 15
     monitor-interval-ms: 300000
   security:
-    phone-hmac-key: ${PHONE_HMAC_KEY:atruvia-stablecoin-2026}
+    phone-hmac-key: ${PHONE_HMAC_KEY:__PHONE_HMAC_KEY_NOT_SET__}

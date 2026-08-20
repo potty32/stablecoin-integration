@@ -134,12 +134,31 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         };
     }
 
+    // S-04-Fix: XFF wird nur berücksichtigt, wenn der direkte TCP-Peer (remoteAddr)
+    // ein konfigurierter Trusted Proxy ist. Ohne Konfiguration → remoteAddr direkt nutzen.
+    // Das verhindert IP-Spoofing durch beliebige X-Forwarded-For-Header.
+    @org.springframework.beans.factory.annotation.Value(
+            "${app.rate-limit.trusted-proxy-cidr:#{null}}")
+    private String trustedProxyCidr;
+
     private String resolveClientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            return xff.split(",")[0].trim();
+        String remoteAddr = request.getRemoteAddr();
+        if (trustedProxyCidr != null && isTrustedProxy(remoteAddr)) {
+            String xff = request.getHeader("X-Forwarded-For");
+            if (xff != null && !xff.isBlank()) {
+                // Rechtestes IP aus XFF nehmen — nicht das erste (client-kontrolliert)
+                String[] parts = xff.split(",");
+                return parts[parts.length - 1].trim();
+            }
         }
-        return request.getRemoteAddr();
+        return remoteAddr;
+    }
+
+    private boolean isTrustedProxy(String remoteAddr) {
+        // Einfacher Prefix-Check (für /24-Subnetze ausreichend, vollständiges CIDR via Apache Commons Net)
+        return trustedProxyCidr != null && remoteAddr.startsWith(
+                trustedProxyCidr.contains("/") ? trustedProxyCidr.substring(0, trustedProxyCidr.lastIndexOf('.')) : trustedProxyCidr
+        );
     }
 
     private void rejectWith429(HttpServletResponse response, String identifier) throws IOException {

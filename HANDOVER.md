@@ -1,6 +1,6 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-20** (feat: Multi-Token-Adapter-Pattern + Atomic DvP Escrow Engine) | GitHub: https://github.com/potty32/stablecoin-integration
+> Letzte Aktualisierung: **2026-08-20** (fix: Audit-Befunde Phase 1+2 — Security, Limits, RBAC, IDOR, OutboxRecovery, SKIP LOCKED, BMAD) | GitHub: https://github.com/potty32/stablecoin-integration
 > **Commit 2026-08-20 (neu):** feat: Multi-Token-Adapter-Pattern (EURAU/EURQ) + DvP Escrow Engine (UC-32–35) + V20
 > **Commit 2026-08-20:** TC-04 Fix (stablecoin_app User + V19 Grant limit_change_log + docker-compose Init-Script)
 > **Commit 2026-08-19:** `879c66b` API Rate Limiting (Token-Bucket) + systematische Test-Erweiterung
@@ -542,13 +542,57 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 - ✅ Architektur-Diagramm (Dual-Rail + RLS Multi-Tenancy)
 - ✅ `testdata/seed_ui_playbook.json` — strukturiertes Playbook-Datenmodell
 
+### ✅ Abgeschlossen 2026-08-20 — Audit-Befunde Phase 1 + 2 (37 Findings)
+
+**Phase 1 — Sofortmaßnahmen (Commit `607a46e`)**
+- ✅ **F-01**: FX-Bug behoben — USDC→EUR `divide` statt `multiply` (17 % Überkreditierung gestoppt)
+- ✅ **F-02/F-03**: Single-TX-Limit + Daily-Limit jetzt durchgesetzt (`LimitResolver` + `sumOutboundAmountToday`)
+- ✅ **S-02**: RBAC — `/api/v1/b2b/admin/**` auf `ROLE_ATRUVIA_ADMIN` beschränkt; JWT `roles`-Claim
+- ✅ **S-03**: IDOR-Fix — `getById(id, customerId)` Ownership-Check in `B2bTransferService`
+- ✅ **T-01**: OutboxProcessor-Recovery — `lookupTenantIdBypassRls()` + `TenantContext.set()` + `try-finally`
+- ✅ V21/V22: `txLimitSingleB2b` 25k→500k; B2B-Seed 25k→200k
+
+**Phase 2a — Security-Block (Commit dieses Sprints)**
+- ✅ **S-04**: `X-Forwarded-For` nur bei konfiguriertem `trustedProxyCidr` → IP-Spoofing verhindert
+- ✅ **S-05**: `PHONE_HMAC_KEY` Startup-Guard (wirft bei Sentinel-Wert `__PHONE_HMAC_KEY_NOT_SET__`)
+- ✅ **S-06**: `getBytes(StandardCharsets.UTF_8)` in `JwtAuthFilter` + `DevAuthController`
+- ✅ **S-07**: V23 — `phone_alias.tenant_id` + RLS, GRANTs für `approval_workflow`, `rate_quote`
+- ✅ **S-09**: IBAN-Sanitierung in `Content-Disposition`-Header (Header-Injection verhindert)
+
+**Phase 2b — Technik/Functional-Block (Commit dieses Sprints)**
+- ✅ **F-05**: Chainalysis-Asset + Network dynamisch (kein USDC/POLYGON hardcoded)
+- ✅ **F-07**: Kill-Switch stoppt OutboxProcessor (HTTP-Filter allein reicht nicht)
+- ✅ **F-08**: AML-Screening für Sammelkonto-Inbound (`processUnassignedInbound`)
+- ✅ **T-02**: Ledger-Booking Crash-Fenster — `LEDGER_BOOKING_INTENT` Outbox-Intent vor externem Call
+- ✅ **T-03**: SKIP LOCKED im OutboxProcessor-Repository (Cluster-safe)
+- ✅ **T-05**: BMAD — `AccountService` extrahiert aus `CommonController`
+- ✅ **T-07**: Double-Approval Race → `IdempotencyConflictException` = HTTP 409
+
+---
+
+### Phase 3 — Backlog (regulatorisch/architektonisch, 4–8 Wochen)
+
+> Alle Punkte erfordern externe Abhängigkeiten (Rechtsabteilung, API-Verträge, Drittsysteme)
+> oder sind aufwändig genug, um eigene Sprints zu rechtfertigen.
+
+| ID | Prio | Beschreibung | Aufwand | Abhängigkeit |
+|----|------|-------------|---------|-------------|
+| **C-01** | 🔴 KRITISCH | **EU TFR / FATF Rec. 16 Travel Rule**: `originator_name` muss aus Kundenstamm befüllt werden; €0-Schwellwert für self-hosted Wallets; VASP-zu-VASP-Transmission (OpenVASP/TRISA); `travelRuleCompletedAt` erst nach VASP-ACK setzen | 4–6 Wochen | Legal-Abstimmung, TRISA-Mitgliedschaft |
+| **C-02** | 🔴 KRITISCH | **MiCA Art. 36 AllUnity**: `HttpAllUnityClient` für prod-Profil (BaFin-Deckungsprüfung ≥105 % vor jedem EURAU-Transfer) | 2–3 Wochen | AllUnity API-Credentials, Vertrag |
+| **F-04** | 🔴 KRITISCH | **GwG §43 FIU-Meldeweg**: Automatisierte Verdachtsmeldung (SAR) an FIU-Online bei `COMPLIANCE_REJECTED`/`AML_INBOUND_BLOCK`; `FiuOnlineClient` + Outbox-Pattern | 3–4 Wochen | FIU-Online API-Zugang, Rechtsfreigabe |
+| **C-03** | 🟡 HOCH | **EStG §45a / WpHG**: DATEV-Export — Zins und Kapital getrennt ausweisen; `TaxEvent.grossYieldEur` im DATEV-Format; FSA-Abzug kumulativ pro Jahr (statt pro Einlösung) | 1–2 Wochen | Steuerberater-Abstimmung |
+| **C-05** | 🟡 MITTEL | **MaRisk AT 4.3.4 Chainalysis-Eskalation**: n8n-Alert bei Circuit-Breaker-Öffnung; Quarantäne-Status für manuelle Review; Optional: Sekundär-Screening-Provider (Elliptic/TRM) | 2 Wochen | n8n-Infrastruktur |
+| **T-06** | 🟡 MITTEL | **DvP Escrow Recovery**: Outbox-Events `DVP_SETTLE_INITIATED` + `DVP_CANCEL_INITIATED` vor externen Calls persistieren; REQUIRES_NEW für DB-Writes (kein doppeltes Settle bei DB-Fehler) | 1 Woche | — |
+| **F-09** | 🟡 MITTEL | **Yield-Rate pro Tenant**: `tenant_settings` um `yield_rate_annual`-Spalte erweitern (V24); `B2cYieldService` liest Rate aus DB statt Hardcode `3.5 %` | 1 Woche | Vertrieb/Konditionen |
+| **S-10** | 🔵 NIEDRIG | **MDC `userId`-Leak**: `MDC.remove("userId")` im finally-Block von `JwtAuthFilter` ergänzen | 15 Min | — |
+| **S-11** | 🔵 NIEDRIG | **Admin-DTO-Validation**: `@NotBlank`/`@NotNull` auf `KillSwitchRequest`, `ReassignTransactionRequest` | 30 Min | — |
+| **S-12** | 🔵 NIEDRIG | **`LocalDateTime.parse` Guard**: `@DateTimeFormat(iso = ISO.DATE_TIME)` statt ungeschütztem `parse()` in Export-Endpoints | 20 Min | — |
+
 ### Offene Punkte (verbleibend)
 
 | Priorität | Beschreibung | Kategorie |
 |---|---|---|
-| 🔴 Hoch | `PHONE_HMAC_KEY` in Prod-Deployment setzen (kein Default-Fallback in Prod) | Security |
 | 🔴 Hoch | `CIRCLE_WEBHOOK_SECRET` in Prod setzen | Security |
-| ✅ **Erledigt 2026-08-19** | Rate-Limiting implementiert (Token-Bucket, alle Endpunkte, Tenant-basiert + IP) | Security |
 | 🟡 Mittel | `HttpDzBankHedgeClient` implementieren (nur Interface + Mock vorhanden) | Feature |
 | 🟡 Mittel | n8n-Alert-Kanal für ReconciliationService verdrahten | Betrieb |
 | 🟡 Mittel | Admin-Trigger-Endpunkt für YieldYearEndService | Feature |

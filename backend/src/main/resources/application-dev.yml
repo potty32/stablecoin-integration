@@ -27,6 +27,7 @@ app:
     jwt-secret: dev-secret-key-minimum-256-bits-for-hs256-algorithm-placeholder
     jwt-expiration-ms: 86400000
     dev-mode: true
+    phone-hmac-key: dev-phone-hmac-key-placeholder-not-for-production-32bytes
 
 resilience4j:
   retry:

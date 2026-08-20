@@ -47,15 +47,18 @@ class OutboxProcessorTest {
     @Mock private B2bTransferService transferService;
     @Mock private InboundProcessingService inboundProcessingService;
     @Mock private JdbcTemplate adminJdbcTemplate;
+    @Mock private de.atruvia.stablecoin.service.b2b.KillSwitchService killSwitchService;
 
     private OutboxProcessor processor;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        // Kill-Switch standardmäßig INAKTIV (Tests sollen normal verarbeiten)
+        when(killSwitchService.isGlobalKillSwitchActive()).thenReturn(false);
         processor = new OutboxProcessor(
                 outboxRepository, n8nWebhookClient, txRepository,
-                circleWalletClient, revenueService, adminJdbcTemplate);
+                circleWalletClient, revenueService, adminJdbcTemplate, killSwitchService);
         ReflectionTestUtils.setField(processor, "transferService", transferService);
         ReflectionTestUtils.setField(processor, "inboundProcessingService", inboundProcessingService);
         // T-01-Fix: adminJdbcTemplate.queryForList() liefert Tenant-ID für BYPASSRLS-Lookup

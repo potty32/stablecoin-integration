@@ -186,7 +186,7 @@ public class B2bController {
             Authentication auth) {
         String resolvedIban = exportService.resolveIban(iban);
         String xml          = exportService.generateCamt053(resolvedIban);
-        String filename     = "camt053-" + resolvedIban + ".xml";
+        String filename     = "camt053-" + sanitizeFilename(resolvedIban) + ".xml";
 
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_XML)
@@ -205,7 +205,7 @@ public class B2bController {
             Authentication auth) {
         String resolvedIban = exportService.resolveIban(iban);
         String xml          = exportService.generateCamt054(resolvedIban);
-        String filename     = "camt054-" + resolvedIban + ".xml";
+        String filename     = "camt054-" + sanitizeFilename(resolvedIban) + ".xml";
 
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_XML)
@@ -249,7 +249,7 @@ public class B2bController {
                 ? java.time.LocalDateTime.parse(since)
                 : java.time.LocalDateTime.now().minusHours(24);
         String xml      = exportService.generateCamt029(resolvedIban, sinceDateTime);
-        String filename = "camt029-" + resolvedIban + ".xml";
+        String filename = "camt029-" + sanitizeFilename(resolvedIban) + ".xml";
 
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_XML)
@@ -268,7 +268,7 @@ public class B2bController {
         String resolvedIban = exportService.resolveIban(iban);
         String csv          = exportService.generateDatev(resolvedIban);
         String date         = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-        String filename     = "datev-export-" + resolvedIban + "-" + date + ".csv";
+        String filename     = "datev-export-" + sanitizeFilename(resolvedIban) + "-" + date + ".csv";
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
@@ -372,6 +372,11 @@ public class B2bController {
      * UC-35: Löst den Escrow auf und gibt den gesperrten Betrag gebührenfrei zurück.
      * Wird aufgerufen wenn die Wertpapierübertragung gescheitert ist.
      */
+    // S-09-Fix: IBAN-Sanitierung gegen Header-Injection via Content-Disposition
+    private static String sanitizeFilename(String iban) {
+        return iban == null ? "unknown" : iban.replaceAll("[^A-Za-z0-9]", "");
+    }
+
     @PostMapping("/dvp/cancel")
     public ResponseEntity<DvpEscrowResponse> dvpCancel(
             @RequestBody @Valid DvpCancelRequest request,
