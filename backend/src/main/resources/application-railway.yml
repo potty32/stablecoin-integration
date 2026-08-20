@@ -3,10 +3,10 @@ spring:
     activate:
       on-profile: railway
 
+  # DATABASE_URL = postgresql://user:pass@host:port/db — von Railway als einzelne Variable gesetzt
+  # jdbc: Prefix nötig für JDBC-Treiber; PGHOST/PGPORT/PGDATABASE haben unerwartete Spaces
   datasource:
-    url: jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
-    username: ${PGUSER}
-    password: ${PGPASSWORD}
+    url: "jdbc:${DATABASE_URL}"
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
@@ -14,10 +14,8 @@ spring:
       connection-timeout: 10000
 
   flyway:
-    url:      jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
-    user:     ${PGUSER}
-    password: ${PGPASSWORD}
-    schemas:  public
+    # Erbt DataSource von oben — keine eigene URL nötig, vermeidet doppelte Konfiguration
+    schemas: public
 
   jpa:
     show-sql: false
