@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./testdata/init_postgres.sql:/docker-entrypoint-initdb.d/01_create_app_user.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stablecoin -d stablecoin_dev"]
       interval: 10s

@@ -1,9 +1,10 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-19** (Security Hardening: Rate Limiting + Testabdeckung) | GitHub: https://github.com/potty32/stablecoin-integration
+> Letzte Aktualisierung: **2026-08-20** (Bugfix: TC-04 RLS-Isolation + fehlende DB-Grants) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commit 2026-08-20:** TC-04 Fix (stablecoin_app User + V19 Grant limit_change_log + docker-compose Init-Script)
 > **Commit 2026-08-19:** `879c66b` API Rate Limiting (Token-Bucket) + systematische Test-Erweiterung
 > **Commits 2026-08-18:** `08a1eb8` Async Kafka/S3 → `930e94c` E2E Cross-Tenant → `1a516ab` Dev-Portal → `887b6f6` Docs → `f31336e` BaFin G-08–G-15
-> **Tests:** 218 | **217 bestanden** | 1 pre-existenter Fehler (CrossTenantInterbankenClearanceTest.tc04) | **Flyway:** V1–V18 | **Frontend:** Angular 18 + Dev-Portal
+> **Tests:** 218 | **218 bestanden** | 0 Fehler | **Flyway:** V1–V19 | **Frontend:** Angular 18 + Dev-Portal
 
 ---
 
@@ -266,10 +267,13 @@ chmod 600 ~/.git-credentials
 # 4. PostgreSQL einrichten
 sudo service postgresql start
 sudo -u postgres psql -c "CREATE USER stablecoin WITH PASSWORD 'stablecoin_dev_pass';"
+# WICHTIG: stablecoin_app MUSS vor Flyway-Start existieren (V8 GRANT)
+sudo -u postgres psql -c "CREATE USER stablecoin_app WITH PASSWORD 'stablecoin_app_pass';"
 sudo -u postgres psql -c "CREATE DATABASE stablecoin_dev OWNER stablecoin;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE stablecoin_dev TO stablecoin;"
+sudo -u postgres psql -c "GRANT CONNECT ON DATABASE stablecoin_dev TO stablecoin_app;"
 
-# 5. Backend bauen und starten (Flyway V1-V7 läuft automatisch)
+# 5. Backend bauen und starten (Flyway V1-V19 läuft automatisch)
 cd backend
 mvn package -DskipTests -q
 SPRING_PROFILES_ACTIVE=dev nohup java -jar target/stablecoin-backend-1.0.0.jar \
@@ -364,10 +368,10 @@ sleep 15 && echo "Frontend ready" && curl -s http://localhost:4200 | head -3
 
 ## 11. Testabdeckung (Stand 2026-08-19)
 
-**Gesamt: 218 Tests | 217 bestanden | 1 pre-existenter Fehler | LINE: ~82% | BRANCH: ~71% | CLASS: ~95%**
+**Gesamt: 218 Tests | 218 bestanden | 0 Fehler | LINE: ~82% | BRANCH: ~71% | CLASS: ~95%**
 
-> Testlauf lokal ausgeführt am 2026-08-19 mit OpenJDK 21 + Maven 3.8.7, PostgreSQL 16 (lokal).
-> Der Fehler in `CrossTenantInterbankenClearanceTest.tc04` (RLS-Isolation) bestand bereits vor diesem Sprint.
+> Testlauf lokal ausgeführt am 2026-08-20 mit OpenJDK 21 + Maven 3.8.7, PostgreSQL 16 (lokal).
+> TC-04-Fehler behoben (2026-08-20): Root Cause war fehlender `stablecoin_app` PostgreSQL-User im Setup.
 
 ### Neue Test-Klassen (2026-08-19, Sprint 3 Hardening)
 
@@ -393,9 +397,12 @@ controller/common:   37%   client/http (WM):    75%  (war 0%)
 config/ratelimit:   100%   (TokenBucket, Filter, TenantType)
 ```
 
-### Bekannter pre-existenter Fehler (nicht durch diesen Sprint verursacht)
+### Bugfix TC-04 (2026-08-20)
 
-- **`CrossTenantInterbankenClearanceTest.tc04_rlsIsolation`**: RLS-Isolation Mandant A/B — schlägt seit Commit `08a1eb8` (Kafka/S3 Architektur) fehl. Root Cause: Flyway-Migration V18 ändert RLS-Policy-Verhalten unter bestimmten Bedingungen. Manueller Fix erforderlich (offenes Ticket).
+- **`CrossTenantInterbankenClearanceTest.tc04_rlsIsolation`**: ✅ **Behoben**
+  - **Root Cause**: Der PostgreSQL-User `stablecoin_app` fehlte im Setup. Flyway V8 (`ENABLE ROW LEVEL SECURITY + GRANT ... TO stablecoin_app`) setzt voraus, dass `stablecoin_app` vor dem ersten Migrationsrun existiert. Ohne diesen User lief die Anwendung als Table-Owner `stablecoin`, der RLS automatisch bypassed. Dadurch waren alle Transaktionen mandantenübergreifend sichtbar — TC-04 schlug fehl.
+  - **Fix**: `stablecoin_app` muss vor dem Flyway-Start existieren. Neu: `testdata/init_postgres.sql` (wird per docker-compose `initdb.d` automatisch ausgeführt). Für lokales Setup ohne Docker: `CREATE USER stablecoin_app WITH PASSWORD 'stablecoin_app_pass';`
+  - **V19**: Neues `V19__grant_limit_change_log_to_app_user.sql` — behebt fehlenden Grant für `limit_change_log` (erstellt in V16, von V8-Bulk-Grant nicht erfasst, von V15 nicht nachgepflegt).
 
 Neue Test-Klassen (2026-08-18):
 - `MultiTenancyIntegrationTest` (5 TCs): RLS-Isolation, EntityListener, JWT-Tenant-Propagation
