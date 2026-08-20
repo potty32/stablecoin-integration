@@ -103,7 +103,11 @@ import { AuthService } from '../../../core/services/auth.service';
                   {{ quote.sourceAmount | number:'1.2-2' }} EUR → {{ quote.targetAmount }} {{ form.get('currency')?.value }}
                 </div>
                 <div style="font-size:0.75rem;color:#166534;margin-top:2px">
-                  Kurs: {{ quote.rate | number:'1.6-6' }} · Spread: {{ quote.spreadPercent | number:'1.2-2' }}% · Gebühr: {{ quote.fee | number:'1.2-2' }} EUR
+                  @if (isEurPegged(form.get('currency')?.value)) {
+                    1:1 EUR-Parität · kein Umtausch · Gebühr: {{ quote.fee | number:'1.2-2' }} EUR
+                  } @else {
+                    Kurs: {{ quote.rate | number:'1.6-6' }} · Spread: {{ quote.spreadPercent | number:'1.2-2' }}% · Gebühr: {{ quote.fee | number:'1.2-2' }} EUR
+                  }
                 </div>
               </div>
               <div [style.color]="quoteSecondsLeft < 15 ? '#dc2626' : '#166534'"
@@ -199,6 +203,7 @@ export class TransferFormComponent implements OnInit, OnDestroy {
     if (!amount || !currency) return;
 
     this.quoteLoading = true;
+    // EUR-gepeggte Coins: kein FX-Quote nötig (1:1), trotzdem Quote für Gebühreninfo holen
     this.txService.getRateQuote(amount, currency).subscribe({
       next: (q) => {
         this.quote = q;
@@ -256,5 +261,10 @@ export class TransferFormComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.countdownSub?.unsubscribe();
+  }
+
+  /** EUR-gepeggte Stablecoins: 1:1 Parität, kein FX-Wechselkurs anzeigen */
+  isEurPegged(currency: string | null | undefined): boolean {
+    return currency === 'EURC' || currency === 'EURAU' || currency === 'EURQ';
   }
 }

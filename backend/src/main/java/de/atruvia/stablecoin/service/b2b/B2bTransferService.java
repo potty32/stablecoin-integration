@@ -214,8 +214,13 @@ public class B2bTransferService {
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException("No B2B account found"));
 
+        // EUR-gepeggte Coins (EURC, EURAU, EURQ): kein FX-Spread, Rate = 1:1
+        boolean eurPegged = isEurPegged(currency);
         BigDecimal baseRate = fxRateService.getBaseRate(currency);
-        BigDecimal rate = baseRate.add(baseRate.multiply(fxSpread)).setScale(8, RoundingMode.HALF_UP);
+        BigDecimal appliedSpread = eurPegged ? BigDecimal.ZERO : fxSpread;
+        BigDecimal rate = eurPegged
+                ? BigDecimal.ONE
+                : baseRate.add(baseRate.multiply(fxSpread)).setScale(8, RoundingMode.HALF_UP);
         LocalDateTime expiresAt = LocalDateTime.now().plusSeconds(rateQuoteValiditySeconds);
 
         RateQuote quote = new RateQuote();
@@ -224,14 +229,14 @@ public class B2bTransferService {
         quote.setTargetCurrency(currency.name());
         quote.setSourceAmount(amountEur);
         quote.setQuotedRate(rate);
-        quote.setSpreadApplied(fxSpread);
+        quote.setSpreadApplied(appliedSpread);
         quote.setExpiresAt(expiresAt);
         rateQuoteRepository.save(quote);
 
         return new RateQuoteResponse(
                 quote.getId(), amountEur,
                 amountEur.multiply(rate).setScale(6, RoundingMode.HALF_UP).toPlainString(),
-                rate, fxSpread.multiply(BigDecimal.valueOf(100)),
+                rate, appliedSpread.multiply(BigDecimal.valueOf(100)),   // 0% für EUR-gepeggte
                 new BigDecimal("2.50"), expiresAt, rateQuoteValiditySeconds
         );
     }
@@ -386,8 +391,13 @@ public class B2bTransferService {
         BigDecimal tenantFee = CustomerType.B2B.equals(account.getCustomerType())
                 ? settings.getFeeFlatB2bEur() : settings.getFeeFlatB2cEur();
 
+        // EUR-gepeggte Coins (EURC, EURAU, EURQ): 1:1 EUR-Parität, kein FX-Spread fachlich korrekt
+        boolean eurPegged = isEurPegged(request.currency());
         BigDecimal baseRate = fxRateService.getBaseRate(request.currency());
-        BigDecimal effectiveRate = baseRate.add(baseRate.multiply(tenantSpread));
+        BigDecimal appliedSpread  = eurPegged ? BigDecimal.ZERO : tenantSpread;
+        BigDecimal effectiveRate  = eurPegged
+                ? BigDecimal.ONE
+                : baseRate.add(baseRate.multiply(tenantSpread));
         if (request.rateQuoteId() != null) {
             RateQuote quote = rateQuoteRepository.findByIdAndStatus(request.rateQuoteId(), QuoteStatus.ACTIVE)
                     .orElseThrow(() -> new IllegalArgumentException("Rate quote invalid: " + request.rateQuoteId()));
@@ -397,6 +407,7 @@ public class B2bTransferService {
                 throw new IllegalArgumentException("Rate quote expired");
             }
             effectiveRate = quote.getQuotedRate();
+            appliedSpread = quote.getSpreadApplied() != null ? quote.getSpreadApplied() : appliedSpread;
             quote.setStatus(QuoteStatus.USED);
             rateQuoteRepository.save(quote);
         }
@@ -407,13 +418,14 @@ public class B2bTransferService {
         tx.setType(TransactionType.OUTBOUND);
         tx.setCurrency(request.currency());
         // G-01: Gross-Debit = Sendebetrag + Flat-Gebühr + FX-Spread-Betrag
-        BigDecimal spreadAmount = request.amountEur().multiply(tenantSpread).setScale(6, RoundingMode.HALF_UP);
+        // EUR-gepeggte Coins: spreadAmount = 0 (kein Wechselkursrisiko)
+        BigDecimal spreadAmount = request.amountEur().multiply(appliedSpread).setScale(6, RoundingMode.HALF_UP);
         BigDecimal grossDebit   = request.amountEur().add(tenantFee).add(spreadAmount).setScale(6, RoundingMode.HALF_UP);
 
         tx.setAmountFiat(request.amountEur());
         tx.setAmountStablecoin(request.amountEur().multiply(effectiveRate).setScale(6, RoundingMode.HALF_UP));
         tx.setFxRate(effectiveRate);
-        tx.setFxSpread(tenantSpread);
+        tx.setFxSpread(appliedSpread);
         tx.setGrossDebit(grossDebit);
         tx.setFeeAmount(tenantFee);
         tx.setSlippageToleranceBps(settings.getSlippageToleranceBps());
@@ -760,6 +772,16 @@ public class B2bTransferService {
      * Publiziert ein TransferStatusEvent auf das Kafka-Topic "stablecoin-transfers".
      * Best-effort (kein Re-throw bei Fehler): Kafka-Ausfall darf Zahlung nicht blockieren.
      */
+    /**
+     * EUR-gepeggte Stablecoins: kein Wechselkursrisiko, Spread = 0, Rate = 1:1.
+     * EURC (Circle Euro Coin), EURAU (AllUnity), EURQ (Qivalis) sind 1:1 an EUR gebunden.
+     */
+    private boolean isEurPegged(StablecoinCurrency currency) {
+        return currency == StablecoinCurrency.EURC
+            || currency == StablecoinCurrency.EURAU
+            || currency == StablecoinCurrency.EURQ;
+    }
+
     private void publishTransferStatusEvent(StablecoinTransaction tx,
                                              String previousStatus, String currentStatus,
                                              String userId) {
