@@ -1584,6 +1584,54 @@ Tenant B JWT → GET /accounts/DE89.../balance → 404 ✅ (RLS filtert fremden 
 
 ---
 
+## UC-36 · Atruvia Stablecoin Copilot (Dev-Portal Chatbot)
+
+**Kontext:** Interaktives Wissens-Tool für Kollegen, Auditoren und Dritte — keine externen LLM-API-Keys erforderlich
+
+**Endpunkt:** `POST /api/v1/common/dev-chat` (nur wenn `app.security.dev-mode=true`)
+
+**Flow:**
+```
+Nutzer tippt Frage im Chat-Widget
+    → Angular DevPortalComponent.sendMessage()
+    → POST /api/v1/common/dev-chat {message, currentTenantId}
+    → DevChatController → DevChatKnowledgeService.answer()
+    → Keyword-Matching über 11 KnowledgeEntries
+    → Mandanten-Personalisierung via TenantSettingsService
+    → DevChatResponse {reply, sourceReferences}
+    → Angular renderMessage() → Markdown-Rendering im Chat
+```
+
+**Wissensbereiche (11 Einträge):**
+- Multi-Tenancy & PostgreSQL RLS (Mandantentrennung)
+- Transactional Outbox Pattern (Crash-Recovery, At-Least-Once)
+- Idempotenz & Race Conditions (PSD2-Replay-Schutz)
+- BaFin MaRisk AT 4.3.4 / BAIT / §25a KWG (Auslagerungen)
+- MiCA / EU TFR / Travel Rule (Stablecoin-Regulierung)
+- Sanctions & AML / GwG §43 (Verdachtsmeldung)
+- B2C Yield-Sparkonto (3,5% p.a., DATEV, EStG §43/§44)
+- DvP Escrow Engine (Herstatt-Risiko, Wertpapierabwicklung)
+- Multi-Token-Adapter (Circle, AllUnity EURAU, Qivalis EURQ)
+- Transaktionslimits & Gebühren (LimitResolver, Vier-Augen)
+- FX-Kursberechnung EUR ↔ USDC (ECB-Rate, Slippage-Schutz)
+
+**UI-Komponente:**
+- Floating Button (unten rechts, Atruvia-Gradient)
+- Slide-In Chat-Panel (390×540px, Dunkel-Theme)
+- 4 klickbare Quick-Actions (Schnellstart ohne Tippen)
+- Schreib-Indikator (800ms Simulationsdelay)
+- Quellen-Badges unter jeder Bot-Antwort
+- Markdown-Rendering (Bold, Code, Listen)
+
+**Neue Dateien:**
+- `controller/common/DevChatController.java`
+- `service/common/DevChatKnowledgeService.java`
+- `dto/request/DevChatRequest.java`, `dto/response/DevChatResponse.java`
+
+**Testfälle:** `DevChatControllerTest` (6 TCs: RLS-Frage, Tenant-Personalisierung, AML/GwG, Outbox, Fallback, Leer-Validierung)
+
+---
+
 ## Technologie-Übersicht
 
 | Schicht | Technologie |

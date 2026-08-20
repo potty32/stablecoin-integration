@@ -414,3 +414,66 @@ ESCROWED → CANCELLED (Wertpapierübertragung gescheitert, EUR zurück auf Kund
 ---
 
 *Generiert: 2026-08-20 | Version: Sprint Multi-Token + DvP | Tests: 232 | 0 Failures*
+
+---
+---
+
+# QA Review — Atruvia Stablecoin Copilot (Dev-Portal Chat)
+## Atruvia Stablecoin Integration Platform — Sprint 2026-08-20 (Nachmittag)
+
+> **Commit:** `feat: implement atruvia stablecoin copilot chatbot`  
+> **Tests:** 238 | 0 Failures (+6 DevChatControllerTest) | **Flyway:** V1–V23
+
+---
+
+## 1. Executive Summary
+
+Integration eines interaktiven Wissens-Chatbots ("Atruvia Stablecoin Copilot") ins Dev-Portal:
+- **Lokale semantische Wissensdatenbank** mit 11 Wissenseinträgen zu Technik, Regulatorik und Fachlichkeit
+- **Mandantenpersonalisierung** — Antworten enthalten aktuelle TenantSettings (Limits, etc.)
+- **Angular Chat-Widget** mit Floating Button, Slide-In Panel, Quick-Actions und Markdown-Rendering
+- Kein externer LLM-API-Key erforderlich (vollständig lokal im dev-Profil)
+
+---
+
+## 2. Neue Komponenten
+
+| Datei | Typ | Beschreibung |
+|-------|-----|-------------|
+| `DevChatController.java` | Backend | POST /api/v1/common/dev-chat (dev-mode only) |
+| `DevChatKnowledgeService.java` | Backend | KB-Engine mit 11 KnowledgeEntries + Tenant-Personalisierung |
+| `DevChatRequest.java` | DTO | message + currentTenantId |
+| `DevChatResponse.java` | DTO | reply + sourceReferences |
+| `dev-portal.component.ts` | Frontend | +Chat-Widget (floating, slide-in, quick-actions) |
+
+---
+
+## 3. Wissenseinträge (Knowledge Base)
+
+| # | Trigger-Keywords | Themenbereich |
+|---|-----------------|--------------|
+| 1 | rls, row level security, mandant, isolat | PostgreSQL RLS, Multi-Tenancy |
+| 2 | outbox, crash, recovery, ausfall | Transactional Outbox Pattern |
+| 3 | idempotenz, race condition, doppelbuchung | Idempotenz, PSD2 |
+| 4 | bafin, bait, marisk, auslagerung | BaFin MaRisk/BAIT, §25a KWG |
+| 5 | mica, tfr, travel rule, emt | MiCA, EU TFR, FATF Rec. 16 |
+| 6 | sanktion, geldwäsche, gwg, 0xdead | AML, GwG §43, Chainalysis |
+| 7 | zinsen, yield, sparkonto, datev, steuer | B2C Yield, EStG §43/§44 |
+| 8 | dvp, wertpapier, herstatt, escrow | DvP Escrow Engine |
+| 9 | token adapter, allunity, qivalis, eurau | Multi-Token-Adapter |
+| 10 | limit, gebühr, vier-augen, approval | Transaktionslimits, LimitResolver |
+| 11 | fx, wechselkurs, usdc kurs, ecb | FX-Kursberechnung |
+
+---
+
+## 4. Test-Coverage (neu)
+
+| Klasse | TCs | Scope |
+|--------|-----|-------|
+| `DevChatControllerTest` | 6 | RLS-KB, Tenant-Personalisierung, AML/GwG, Outbox, Fallback, Validierung |
+
+**Gesamt: 238 Tests | 238 bestanden | 0 Failures | Δ+6 TCs**
+
+---
+
+*Generiert: 2026-08-20 | Version: Sprint Copilot | Tests: 238 | 0 Failures*

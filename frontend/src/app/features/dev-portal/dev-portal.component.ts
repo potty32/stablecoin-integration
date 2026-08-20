@@ -481,6 +481,161 @@ interface Tab {
   </div>
 
 </div>
+
+<!-- ╔══════════════════════════════════════════════════════════════════╗ -->
+<!-- ║   ATRUVIA STABLECOIN COPILOT — Floating Chat Widget             ║ -->
+<!-- ╚══════════════════════════════════════════════════════════════════╝ -->
+
+<!-- Floating Chat Button -->
+<button (click)="toggleChat()"
+  style="position:fixed;bottom:28px;right:28px;z-index:1000;
+         width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;
+         background:linear-gradient(135deg,#1e40af,#0ea5e9);
+         box-shadow:0 4px 20px rgba(14,165,233,.45);
+         display:flex;align-items:center;justify-content:center;
+         transition:transform .2s,box-shadow .2s;"
+  [style.transform]="chatOpen ? 'scale(0.9)' : 'scale(1)'"
+  title="Atruvia Stablecoin Copilot öffnen">
+  <span style="font-size:22px;">{{chatOpen ? '✕' : '🤖'}}</span>
+</button>
+
+<!-- Chat Panel -->
+<div *ngIf="chatOpen"
+  style="position:fixed;bottom:96px;right:28px;z-index:999;
+         width:390px;height:540px;border-radius:16px;overflow:hidden;
+         background:#0f172a;border:1px solid #1e3a5f;
+         box-shadow:0 12px 48px rgba(0,0,0,.65);
+         display:flex;flex-direction:column;">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#1e3a5f,#0c2340);
+              padding:14px 18px;display:flex;align-items:center;gap:12px;
+              border-bottom:1px solid #1e3a5f;flex-shrink:0;">
+    <div style="width:38px;height:38px;border-radius:50%;
+                background:linear-gradient(135deg,#1e40af,#0ea5e9);
+                display:flex;align-items:center;justify-content:center;font-size:18px;">🤖</div>
+    <div>
+      <div style="font-weight:700;font-size:14px;color:#f1f5f9;">Atruvia Stablecoin Copilot</div>
+      <div style="font-size:11px;color:#22c55e;display:flex;align-items:center;gap:5px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;
+                     animation:copilotPulse 2s infinite;"></span>
+        Online · Wissensdatenbank aktiv
+      </div>
+    </div>
+    <div *ngIf="chatMessages.length > 0" style="margin-left:auto;">
+      <button (click)="clearChat()"
+        style="background:none;border:1px solid #1e3a5f;border-radius:6px;
+               color:#64748b;font-size:10px;padding:3px 8px;cursor:pointer;">
+        Leeren
+      </button>
+    </div>
+  </div>
+
+  <!-- Message Scroll Area -->
+  <div #chatScrollArea id="chatScrollArea"
+    style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;
+           scrollbar-width:thin;scrollbar-color:#1e3a5f transparent;">
+
+    <!-- Welcome & Quick Actions (initial) -->
+    <ng-container *ngIf="chatMessages.length === 0">
+      <div style="background:#1e293b;border-radius:12px;padding:14px 16px;
+                  border:1px solid #1e3a5f;font-size:12.5px;color:#94a3b8;line-height:1.7;">
+        👋 <strong style="color:#e2e8f0;">Willkommen beim Atruvia Stablecoin Copilot!</strong><br>
+        Ich beantworte Fragen zur Plattform — fachlich, technisch, regulatorisch und architektonisch.
+        Einfach tippen oder eine der Schnellfragen auswählen:
+      </div>
+      <div style="font-size:10.5px;color:#475569;font-weight:700;
+                  letter-spacing:.08em;text-transform:uppercase;padding:2px 0;">
+        Schnellstart-Fragen
+      </div>
+      <div *ngFor="let qa of quickActions; let i = index"
+        (click)="sendMessage(qa.text)"
+        style="background:#1e293b;border:1px solid #1e3a5f;border-radius:10px;
+               padding:10px 13px;cursor:pointer;
+               display:flex;align-items:flex-start;gap:10px;
+               font-size:12px;color:#cbd5e1;line-height:1.5;
+               transition:background .15s,border-color .15s;"
+        onmouseover="this.style.background='#1e3a5f';this.style.borderColor='#3b82f6';"
+        onmouseout="this.style.background='#1e293b';this.style.borderColor='#1e3a5f';">
+        <span style="font-size:16px;flex-shrink:0;margin-top:1px;">{{qa.icon}}</span>
+        <span>{{qa.text}}</span>
+      </div>
+    </ng-container>
+
+    <!-- Conversation Messages -->
+    <div *ngFor="let msg of chatMessages" style="display:flex;flex-direction:column;">
+
+      <!-- User bubble -->
+      <div *ngIf="msg.role === 'user'" style="display:flex;justify-content:flex-end;margin-bottom:2px;">
+        <div style="max-width:82%;background:linear-gradient(135deg,#1e40af,#1d4ed8);
+                    border-radius:14px 14px 3px 14px;padding:10px 14px;
+                    font-size:12.5px;color:#e2e8f0;line-height:1.55;">
+          {{msg.text}}
+        </div>
+      </div>
+
+      <!-- Bot bubble -->
+      <div *ngIf="msg.role === 'bot'" style="display:flex;flex-direction:column;gap:6px;max-width:94%;">
+        <div style="background:#1e293b;border:1px solid #1e3a5f;
+                    border-radius:3px 14px 14px 14px;padding:12px 14px;
+                    font-size:12px;color:#cbd5e1;line-height:1.75;
+                    white-space:pre-wrap;word-break:break-word;"
+          [innerHTML]="renderMessage(msg.text)">
+        </div>
+        <div *ngIf="msg.sources && msg.sources.length"
+          style="display:flex;flex-wrap:wrap;gap:5px;padding-left:2px;">
+          <span *ngFor="let src of msg.sources"
+            style="background:#0f2d4a;border:1px solid #1e3a5f;border-radius:5px;
+                   padding:2px 8px;font-size:10px;color:#64748b;cursor:default;"
+            [title]="src">{{src}}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Typing indicator -->
+    <div *ngIf="chatTyping"
+      style="display:flex;align-items:center;gap:6px;padding:10px 14px;
+             background:#1e293b;border:1px solid #1e3a5f;
+             border-radius:3px 14px 14px 14px;width:fit-content;">
+      <span style="font-size:11px;color:#64748b;">Copilot schreibt</span>
+      <span style="width:6px;height:6px;border-radius:50%;background:#3b82f6;display:inline-block;
+                   animation:dot 1.2s infinite .0s;"></span>
+      <span style="width:6px;height:6px;border-radius:50%;background:#3b82f6;display:inline-block;
+                   animation:dot 1.2s infinite .2s;"></span>
+      <span style="width:6px;height:6px;border-radius:50%;background:#3b82f6;display:inline-block;
+                   animation:dot 1.2s infinite .4s;"></span>
+    </div>
+  </div>
+
+  <!-- Input Row -->
+  <div style="padding:12px 14px;border-top:1px solid #1e3a5f;background:#0c1a2e;
+              display:flex;gap:8px;align-items:flex-end;flex-shrink:0;">
+    <textarea [(ngModel)]="chatInput"
+      (keydown)="onChatKeydown($event)"
+      placeholder="Frage stellen... (Enter = Senden)"
+      rows="2"
+      style="flex:1;background:#1e293b;border:1px solid #1e3a5f;border-radius:10px;
+             padding:9px 12px;color:#e2e8f0;font-size:12.5px;resize:none;
+             font-family:inherit;outline:none;line-height:1.5;
+             scrollbar-width:thin;scrollbar-color:#1e3a5f transparent;">
+    </textarea>
+    <button (click)="sendMessage()"
+      [disabled]="!chatInput.trim() || chatTyping"
+      style="width:40px;height:40px;border-radius:10px;border:none;cursor:pointer;
+             background:linear-gradient(135deg,#1e40af,#0ea5e9);
+             color:#fff;font-size:18px;flex-shrink:0;line-height:1;
+             transition:opacity .2s;"
+      [style.opacity]="(!chatInput.trim() || chatTyping) ? '0.35' : '1'">
+      ➤
+    </button>
+  </div>
+</div>
+
+<style>
+  @keyframes copilotPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  @keyframes dot { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
+</style>
+
   `
 })
 export class DevPortalComponent implements OnInit {
@@ -934,6 +1089,82 @@ export class DevPortalComponent implements OnInit {
       ]
     }
   ];
+
+  // ── Copilot Chat State ────────────────────────────────────────────────────────
+
+  chatOpen   = false;
+  chatInput  = '';
+  chatTyping = false;
+  chatMessages: { role: 'user' | 'bot'; text: string; sources?: string[] }[] = [];
+
+  quickActions = [
+    { icon: '💡', text: 'Wie sichern wir die Datenisolation (Multi-Tenancy) zwischen den VR-Banken ab?' },
+    { icon: '🔒', text: 'Was passiert gesetzlich und technisch bei einem Sanktionstreffer?' },
+    { icon: '📈', text: 'Wie ist das Yield-Guthaben und die Zinsberechnung steuerrechtlich (DATEV) gelöst?' },
+    { icon: '⚙️', text: 'Wie schützt das Outbox Pattern uns vor Systemabstürzen?' }
+  ];
+
+  toggleChat() { this.chatOpen = !this.chatOpen; }
+  clearChat()  { this.chatMessages = []; }
+
+  onChatKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      this.sendMessage();
+    }
+  }
+
+  sendMessage(text?: string) {
+    const msg = (text ?? this.chatInput).trim();
+    if (!msg || this.chatTyping) return;
+    this.chatInput = '';
+    this.chatMessages.push({ role: 'user', text: msg });
+    this.chatTyping = true;
+    this.scrollChat();
+
+    const tenantId = localStorage.getItem('tenant_id') ?? 'tenant-default';
+    this.http.post<{ reply: string; sourceReferences: string[] }>(
+      '/api/v1/common/dev-chat',
+      { message: msg, currentTenantId: tenantId }
+    ).subscribe({
+      next: res => {
+        setTimeout(() => {
+          this.chatTyping = false;
+          this.chatMessages.push({
+            role: 'bot',
+            text: res.reply,
+            sources: res.sourceReferences ?? []
+          });
+          this.scrollChat();
+        }, 850);
+      },
+      error: () => {
+        this.chatTyping = false;
+        this.chatMessages.push({
+          role: 'bot',
+          text: '⚠️ Der Copilot ist momentan nicht verfügbar. Bitte prüfe, ob das Backend läuft und das dev-Profil aktiv ist.'
+        });
+        this.scrollChat();
+      }
+    });
+  }
+
+  renderMessage(text: string): string {
+    // Minimal Markdown → HTML (Bold, Code, Listeneinträge, Zeilenumbrüche)
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#e2e8f0;">$1</strong>')
+      .replace(/`(.+?)`/g, '<code style="background:#0f172a;padding:1px 5px;border-radius:3px;font-family:monospace;color:#7dd3fc;">$1</code>')
+      .replace(/^[-•]\s(.+)$/gm, '<span style="display:block;padding-left:12px;position:relative;"><span style="position:absolute;left:0;color:#3b82f6;">▸</span>$1</span>')
+      .replace(/\n/g, '<br>');
+  }
+
+  private scrollChat() {
+    setTimeout(() => {
+      const el = document.getElementById('chatScrollArea');
+      if (el) el.scrollTop = el.scrollHeight;
+    }, 50);
+  }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
