@@ -1257,7 +1257,7 @@ export class DevPortalComponent implements OnInit {
     const userId = this.selectedUserId;
 
     this.http.get<{ token: string }>(
-      `/api/v1/auth/dev-token?customerId=${userId}&tenant=${tenant}`
+      `/api/v1/auth/dev-token?customerId=${userId}&tenant=${tenant}&admin=true`
     ).subscribe({
       next: res => {
         localStorage.setItem('access_token', res.token);
