@@ -51,9 +51,10 @@ public class AccountService {
 
     /** Prüft Ownership und liefert Fiat + Stablecoin-Guthaben. */
     public AccountBalanceResponse getBalanceForCustomer(String iban, String customerId) {
-        CustomerAccount account = accountRepository.findByCustomerId(customerId)
-                .orElseThrow(() -> new NoSuchElementException("No account for user: " + customerId));
-        if (!account.getIban().equals(iban)) {
+        // IBAN ist systemweit eindeutig → Lookup per IBAN; dann Ownership per customerId
+        CustomerAccount account = accountRepository.findByIban(iban)
+                .orElseThrow(() -> new NoSuchElementException("Account not found: " + iban));
+        if (!account.getCustomerId().equals(customerId)) {
             throw new AccessDeniedException("Access denied to account: " + iban);
         }
 

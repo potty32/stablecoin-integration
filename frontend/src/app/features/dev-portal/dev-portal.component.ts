@@ -683,11 +683,11 @@ export class DevPortalComponent implements OnInit {
   ];
 
   readonly users: UserProfile[] = [
-    { customerId: 'cust-b2b-001',      name: 'Müller GmbH',         role: 'Initiator/Admin', iban: 'DE89370400440532013010', type: 'B2B', tenantId: 'tenant-kleine-vb' },
-    { customerId: 'cust-b2b-approver', name: 'Schmidt AG',           role: 'Zweitfreigeber',  iban: 'DE89370400440532013011', type: 'B2B', tenantId: 'tenant-kleine-vb' },
-    { customerId: 'cust-b2b-001',      name: 'Müller GmbH (Metro)',  role: 'Initiator',       iban: 'DE89370400440532013020', type: 'B2B', tenantId: 'tenant-grosse-vb' },
-    { customerId: 'cust-b2c-001',      name: 'Max Mustermann',       role: 'Privatkunde',     iban: 'DE27200400600532013010', type: 'B2C', tenantId: 'tenant-kleine-vb' },
-    { customerId: 'cust-b2c-001',      name: 'Mustermann (Metro)',   role: 'Privatkunde',     iban: 'DE27200400600532013020', type: 'B2C', tenantId: 'tenant-grosse-vb' }
+    { customerId: 'cust-b2b-001',      name: 'Müller GmbH',         role: 'Initiator/Admin', iban: 'DE89370400440532090001', type: 'B2B', tenantId: 'tenant-kleine-vb' },
+    { customerId: 'cust-b2b-approver', name: 'Schmidt AG',           role: 'Zweitfreigeber',  iban: 'DE89370400440532090002', type: 'B2B', tenantId: 'tenant-kleine-vb' },
+    { customerId: 'cust-b2b-001',      name: 'Müller GmbH (Metro)',  role: 'Initiator',       iban: 'DE89370400440532090003', type: 'B2B', tenantId: 'tenant-grosse-vb' },
+    { customerId: 'cust-b2c-001',      name: 'Max Mustermann',       role: 'Privatkunde',     iban: 'DE27200400600532090001', type: 'B2C', tenantId: 'tenant-kleine-vb' },
+    { customerId: 'cust-b2c-001',      name: 'Mustermann (Metro)',   role: 'Privatkunde',     iban: 'DE27200400600532090003', type: 'B2C', tenantId: 'tenant-grosse-vb' }
   ];
 
   get filteredUsers(): UserProfile[] {

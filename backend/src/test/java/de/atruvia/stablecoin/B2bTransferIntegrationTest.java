@@ -120,12 +120,33 @@ class B2bTransferIntegrationTest extends AbstractLocalDbTest {
 
         assertThat(pending.status()).isEqualTo(TransactionStatus.PENDING_APPROVAL);
 
-        // Approve durch anderen User (dev-mode=true → self-approval erlaubt)
+        // Vier-Augen: Freigabe durch ANDEREN Nutzer (cust-approver-001 ≠ cust-b2b-001)
         TransactionResponse settled = transferService.approve(
                 pending.transactionId(),
                 new ApproveTransferRequest("cust-approver-001"));
 
         assertThat(settled.status()).isEqualTo(TransactionStatus.SETTLED);
+    }
+
+    // TC3b: Vier-Augen-Schutz — Selbst-Freigabe wird abgelehnt (SELF_APPROVAL_001)
+    @Test
+    void selfApproval_aboveThreshold_isRejected() {
+        whitelistWallet(LOW_RISK_WALLET);
+
+        TransactionResponse pending = transferService.initiate(
+                UUID.randomUUID().toString(),
+                new InitiateTransferRequest(B2B_IBAN, LOW_RISK_WALLET,
+                        new BigDecimal("50000"), StablecoinCurrency.USDC, null, null, "Bulk", null, null, null),
+                "cust-b2b-001");
+
+        assertThat(pending.status()).isEqualTo(TransactionStatus.PENDING_APPROVAL);
+
+        // Gleicher User wie Initiator → muss mit IllegalStateException abbrechen
+        assertThatThrownBy(() -> transferService.approve(
+                pending.transactionId(),
+                new ApproveTransferRequest("cust-b2b-001")))  // ← gleicher Nutzer!
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("SELF_APPROVAL_001");
     }
 
     // TC4: Chainalysis-Block (0xDEAD...) — TX landet mit Status BLOCKED

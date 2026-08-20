@@ -183,8 +183,12 @@ public class B2bTransferService {
         if (workflow.getStatus() != ApprovalStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Not pending approval: " + workflow.getStatus());
         }
-        if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
-            throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
+        // Vier-Augen-Prinzip: Freigeber MUSS ein anderer Nutzer sein als Erfasser
+        if (workflow.getInitiatorId().equals(request.approverId())) {
+            throw new IllegalStateException(
+                "SELF_APPROVAL_001: Vier-Augen-Prinzip verletzt — " +
+                "Erfasser und Freigeber müssen unterschiedliche Nutzer sein (" +
+                request.approverId() + ")");
         }
 
         UUID txId = workflow.getTransaction().getId();
@@ -502,8 +506,12 @@ public class B2bTransferService {
             // T-07-Fix: Race-Condition gibt 409 Conflict statt 500 IllegalStateException
             throw new de.atruvia.stablecoin.exception.IdempotencyConflictException(transactionId);
         }
-        if (!devMode && workflow.getInitiatorId().equals(request.approverId())) {
-            throw new IllegalStateException("Self-approval not allowed: initiator and approver must be different users");
+        // Vier-Augen-Prinzip: Freigeber MUSS ein anderer Nutzer sein als Erfasser
+        if (workflow.getInitiatorId().equals(request.approverId())) {
+            throw new IllegalStateException(
+                "SELF_APPROVAL_001: Vier-Augen-Prinzip verletzt — " +
+                "Erfasser und Freigeber müssen unterschiedliche Nutzer sein (" +
+                request.approverId() + ")");
         }
 
         if (workflow.getExpiresAt().isBefore(LocalDateTime.now())) {
