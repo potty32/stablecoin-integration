@@ -8,7 +8,8 @@ builder         = "DOCKERFILE"
 dockerfilePath  = "Dockerfile"
 
 [deploy]
-startCommand            = "java $JAVA_OPTS -jar app.jar"
+# startCommand absichtlich weggelassen: Dockerfile-ENTRYPOINT wird verwendet.
+# "sh -c 'java $JAVA_OPTS -jar app.jar'" expandiert $JAVA_OPTS korrekt.
 healthcheckPath         = "/actuator/health"
 healthcheckTimeout      = 120
 restartPolicyType       = "ON_FAILURE"
