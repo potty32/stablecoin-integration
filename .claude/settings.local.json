@@ -19,7 +19,8 @@
       "Bash(sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE stabledb TO stableuser;\")",
       "Bash(node -version)",
       "Bash(pg_isready)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(xargs cat)"
     ]
   }
 }

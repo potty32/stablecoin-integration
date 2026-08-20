@@ -3,31 +3,26 @@ spring:
     activate:
       on-profile: railway
 
-  # PostgreSQL via Railway-Umgebungsvariablen
+  # Railway stellt DATABASE_URL bereit: postgresql://user:pass@host:port/db
+  # jdbc: Prefix hinzufügen → HikariCP liest User/Pass automatisch aus der URL
   datasource:
-    url: jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
-    username: ${PGUSER}
-    password: ${PGPASSWORD}
+    url: "jdbc:${DATABASE_URL}?sslmode=require"
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 5      # PostgreSQL Hobby-Plan: max 5 Connections
+      maximum-pool-size: 5
       minimum-idle: 1
       connection-timeout: 10000
 
   flyway:
-    url:      jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require
-    user:     ${PGUSER}
-    password: ${PGPASSWORD}
-    schemas:  public
+    url: "jdbc:${DATABASE_URL}?sslmode=require"
+    # User/Password werden von Flyway aus der URL gelesen (kein separates Feld nötig)
 
   jpa:
     show-sql: false
 
-# Server-Port aus Railway-Env (Standard: 8080)
 server:
   port: ${PORT:8080}
 
-# Logging: minimal auf Railway
 logging:
   level:
     root: WARN
@@ -35,16 +30,13 @@ logging:
 
 app:
   security:
-    # JWT-Secret aus Railway-Variable (mind. 32 Zeichen)
     jwt-secret: ${JWT_SECRET}
     jwt-expiration-ms: 86400000
-    # Dev-Mode: Mocks für Circle, Taurus, Chainalysis aktiv — kein echter API-Key nötig
     dev-mode: true
-    phone-hmac-key: ${PHONE_HMAC_KEY:railway-phone-hmac-placeholder-32-bytes}
+    phone-hmac-key: ${PHONE_HMAC_KEY:railway-phone-hmac-placeholder-32-bytes-ok}
   webhook:
     circle-secret: ${CIRCLE_WEBHOOK_SECRET:railway-webhook-placeholder}
 
-# Actuator: nur Health (kein Metrics-Leak)
 management:
   endpoints:
     web:
