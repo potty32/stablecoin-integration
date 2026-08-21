@@ -3,11 +3,10 @@ spring:
     activate:
       on-profile: railway
 
-  # Explizite URL aus PG*-Variablen — vermeidet Formatprobleme mit DATABASE_URL
-  # (Railway setzt DATABASE_URL teils als postgres://, teils als postgresql://).
-  # ?sslmode=require: Railway-PostgreSQL erfordert TLS für interne Verbindungen.
+  # DATABASE_URL von Railway: postgresql://user:pass@host:port/db (ggf. ?sslmode=require)
+  # jdbc:-Prefix macht daraus eine gültige JDBC-URL für den PostgreSQL-Treiber.
   datasource:
-    url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require"
+    url: "jdbc:${DATABASE_URL}"
     username: ${PGUSER}
     password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
@@ -17,11 +16,15 @@ spring:
       connection-timeout: 10000
 
   flyway:
-    url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?sslmode=require"
+    url: "jdbc:${DATABASE_URL}"
     user: ${PGUSER}
     password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
     schemas: public
+    # connect-retries > 0: verhindert Flyway-Bug der SQLException still schluckt
+    # und null zurückgibt — mit Retries wird der echte DB-Fehler sichtbar
+    connect-retries: 5
+    connect-retries-interval: 3
 
   jpa:
     show-sql: false
