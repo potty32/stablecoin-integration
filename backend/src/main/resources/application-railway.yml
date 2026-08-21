@@ -3,10 +3,11 @@ spring:
     activate:
       on-profile: railway
 
-  # DATABASE_URL von Railway: postgresql://user:pass@host:port/db (ggf. ?sslmode=require)
-  # jdbc:-Prefix macht daraus eine gültige JDBC-URL für den PostgreSQL-Treiber.
+  # Credentials NICHT in der URL einbetten — PostgreSQL JDBC 42.7.x parst user:pass@host
+  # nicht korrekt und behandelt den gesamten Ausdruck als Hostnamen (UnknownHostException).
+  # Stattdessen: URL nur mit Host/Port/DB, Credentials separat via username/password.
   datasource:
-    url: "jdbc:${DATABASE_URL}"
+    url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}"
     username: ${PGUSER}
     password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
@@ -17,7 +18,7 @@ spring:
 
   flyway:
     # Überschreibt dev-Profil (localhost) — @FlywayDataSource Bean nutzt SimpleDriverDataSource
-    url: "jdbc:${DATABASE_URL}"
+    url: "jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}"
     user: ${PGUSER}
     password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
