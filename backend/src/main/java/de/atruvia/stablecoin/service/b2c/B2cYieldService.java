@@ -104,7 +104,10 @@ public class B2cYieldService {
 
     @Transactional(readOnly = true)
     public YieldPositionResponse getPosition(String customerId) {
-        CustomerAccount account = accountRepository.findByCustomerId(customerId)
+        String tenantId = de.atruvia.stablecoin.config.TenantContext.get();
+        CustomerAccount account = (tenantId != null && !tenantId.isBlank()
+                ? accountRepository.findByCustomerIdAndTenantId(customerId, tenantId)
+                : accountRepository.findByCustomerId(customerId))
                 .orElseThrow(() -> new NoSuchElementException("Account not found for customer: " + customerId));
         YieldPosition position = yieldPositionRepository
                 .findByCustomerAccountIdAndStatus(account.getId(), YieldStatus.ACTIVE)

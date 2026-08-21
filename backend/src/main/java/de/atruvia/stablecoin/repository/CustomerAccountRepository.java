@@ -11,5 +11,8 @@ import java.util.UUID;
 public interface CustomerAccountRepository extends JpaRepository<CustomerAccount, UUID> {
     Optional<CustomerAccount> findByIban(String iban);
     Optional<CustomerAccount> findByCustomerId(String customerId);
+
+    /** Tenant-aware Variante — verhindert cross-tenant Ergebnisse wenn RLS nicht greift (z.B. Railway). */
+    Optional<CustomerAccount> findByCustomerIdAndTenantId(String customerId, String tenantId);
     Optional<CustomerAccount> findByWalletAddress(String walletAddress);
 }

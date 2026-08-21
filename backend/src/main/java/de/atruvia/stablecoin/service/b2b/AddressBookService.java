@@ -13,6 +13,7 @@ import de.atruvia.stablecoin.entity.RiskScore;
 import de.atruvia.stablecoin.exception.ComplianceBlockException;
 import de.atruvia.stablecoin.repository.AddressBookRepository;
 import de.atruvia.stablecoin.repository.AuditLogRepository;
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.repository.CustomerAccountRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
@@ -85,9 +86,17 @@ public class AddressBookService {
         throw new ComplianceBlockException(request.walletAddress(), "UNAVAILABLE");
     }
 
+    private java.util.Optional<de.atruvia.stablecoin.entity.CustomerAccount> resolveAccount(String userId) {
+        String tenantId = TenantContext.get();
+        if (tenantId != null && !tenantId.isBlank()) {
+            return accountRepository.findByCustomerIdAndTenantId(userId, tenantId);
+        }
+        return accountRepository.findByCustomerId(userId);
+    }
+
     @Transactional(readOnly = true)
     public List<AddressBookResponse> listAddresses(String userId) {
-        return accountRepository.findByCustomerId(userId)
+        return resolveAccount(userId)
                 .map(account -> addressBookRepository
                         .findByCustomerAccountIdAndStatus(account.getId(), AddressStatus.ACTIVE)
                         .stream().map(this::toResponse).toList())
@@ -109,7 +118,7 @@ public class AddressBookService {
     }
 
     private CustomerAccount resolveAccount(String userId) {
-        return accountRepository.findByCustomerId(userId)
+        return resolveAccount(userId)
                 .orElseThrow(() -> new NoSuchElementException("No account for user: " + userId));
     }
 

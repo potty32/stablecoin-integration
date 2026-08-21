@@ -832,7 +832,12 @@ public class B2bTransferService {
     public TransferPageResponse listTransfers(String userId, TransactionStatus statusFilter, int page, int size) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-        Page<StablecoinTransaction> txPage = accountRepository.findByCustomerId(userId)
+        String tenantId = TenantContext.get();
+        java.util.Optional<de.atruvia.stablecoin.entity.CustomerAccount> accountOpt =
+                (tenantId != null && !tenantId.isBlank())
+                ? accountRepository.findByCustomerIdAndTenantId(userId, tenantId)
+                : accountRepository.findByCustomerId(userId);
+        Page<StablecoinTransaction> txPage = accountOpt
                 .map(account -> statusFilter != null
                         ? txRepository.findByCustomerAccountIdAndStatus(account.getId(), statusFilter, pageable)
                         : txRepository.findByCustomerAccountId(account.getId(), pageable))

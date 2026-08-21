@@ -9,6 +9,7 @@ import de.atruvia.stablecoin.entity.CustomerAccount;
 import de.atruvia.stablecoin.entity.StablecoinTransaction;
 import de.atruvia.stablecoin.repository.ApprovalWorkflowRepository;
 import de.atruvia.stablecoin.repository.AuditLogRepository;
+import de.atruvia.stablecoin.config.TenantContext;
 import de.atruvia.stablecoin.repository.CustomerAccountRepository;
 import de.atruvia.stablecoin.repository.StablecoinTransactionRepository;
 import org.springframework.security.access.AccessDeniedException;
@@ -75,7 +76,7 @@ public class AccountService {
         StablecoinTransaction tx = txRepository.findById(txId)
                 .orElseThrow(() -> new NoSuchElementException("Transaction not found: " + txId));
 
-        CustomerAccount account = accountRepository.findByCustomerId(customerId)
+        CustomerAccount account = findAccountByCustomerId(customerId)
                 .orElseThrow(() -> new NoSuchElementException("No account for user: " + customerId));
         if (!tx.getCustomerAccount().getId().equals(account.getId())) {
             throw new AccessDeniedException("Access denied to transaction: " + txId);
@@ -89,6 +90,19 @@ public class AccountService {
                 tx.getAmountFiat(), tx.getAmountStablecoin(), tx.getCurrency(),
                 tx.getBlockchainHash(), tx.getGrossRevenue(), requiresApproval,
                 tx.getCreatedAt(), tx.getSettledAt(), timeline);
+    }
+
+    /**
+     * Tenant-aware Account-Lookup: bevorzugt findByCustomerIdAndTenantId wenn TenantContext gesetzt.
+     * Fallback auf findByCustomerId (z.B. für Background-Jobs ohne Tenant-Kontext).
+     * Verhindert cross-tenant Ergebnisse wenn RLS nicht greift (Railway: Table-Owner bypassed RLS).
+     */
+    public java.util.Optional<CustomerAccount> findAccountByCustomerId(String customerId) {
+        String tenantId = TenantContext.get();
+        if (tenantId != null && !tenantId.isBlank()) {
+            return accountRepository.findByCustomerIdAndTenantId(customerId, tenantId);
+        }
+        return accountRepository.findByCustomerId(customerId);
     }
 
     private List<TransactionResponse.TimelineEntry> buildTimeline(UUID txId) {
