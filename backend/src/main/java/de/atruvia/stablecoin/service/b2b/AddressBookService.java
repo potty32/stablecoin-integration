@@ -86,17 +86,21 @@ public class AddressBookService {
         throw new ComplianceBlockException(request.walletAddress(), "UNAVAILABLE");
     }
 
-    private java.util.Optional<de.atruvia.stablecoin.entity.CustomerAccount> resolveAccount(String userId) {
+    private CustomerAccount resolveAccount(String userId) {
         String tenantId = TenantContext.get();
-        if (tenantId != null && !tenantId.isBlank()) {
-            return accountRepository.findByCustomerIdAndTenantId(userId, tenantId);
-        }
-        return accountRepository.findByCustomerId(userId);
+        java.util.Optional<CustomerAccount> opt = (tenantId != null && !tenantId.isBlank())
+                ? accountRepository.findByCustomerIdAndTenantId(userId, tenantId)
+                : accountRepository.findByCustomerId(userId);
+        return opt.orElseThrow(() -> new NoSuchElementException("No account for user: " + userId));
     }
 
     @Transactional(readOnly = true)
     public List<AddressBookResponse> listAddresses(String userId) {
-        return resolveAccount(userId)
+        String tenantId = TenantContext.get();
+        java.util.Optional<CustomerAccount> accountOpt = (tenantId != null && !tenantId.isBlank())
+                ? accountRepository.findByCustomerIdAndTenantId(userId, tenantId)
+                : accountRepository.findByCustomerId(userId);
+        return accountOpt
                 .map(account -> addressBookRepository
                         .findByCustomerAccountIdAndStatus(account.getId(), AddressStatus.ACTIVE)
                         .stream().map(this::toResponse).toList())
@@ -115,11 +119,6 @@ public class AddressBookService {
                 "Adresse widerrufen: address=" + address.getWalletAddress() + ", label=" + address.getLabel());
 
         log.info("[ADDRESS-BOOK] Revoked address={} user={}", address.getWalletAddress(), userId);
-    }
-
-    private CustomerAccount resolveAccount(String userId) {
-        return resolveAccount(userId)
-                .orElseThrow(() -> new NoSuchElementException("No account for user: " + userId));
     }
 
     private void writeAuditLog(UUID entityId, String action, String userId, String details) {
