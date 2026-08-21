@@ -28,11 +28,9 @@ server:
 
 logging:
   level:
-    root: INFO
-    com.zaxxer.hikari: DEBUG
-    org.flywaydb: DEBUG
-    org.springframework.orm.jpa: DEBUG
-    org.hibernate.engine.jdbc.env: DEBUG
+    root: WARN
+    de.atruvia.stablecoin: INFO
+    org.flywaydb.core.internal.command: INFO
 
 app:
   security:
