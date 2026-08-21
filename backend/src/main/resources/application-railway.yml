@@ -16,9 +16,12 @@ spring:
       connection-timeout: 10000
 
   flyway:
+    # Überschreibt dev-Profil (localhost) — @FlywayDataSource Bean nutzt SimpleDriverDataSource
+    url: "jdbc:${DATABASE_URL}"
+    user: ${PGUSER}
+    password: ${PGPASSWORD}
+    driver-class-name: org.postgresql.Driver
     schemas: public
-    # Kein spring.flyway.url → Flyway nutzt die primäre DataSource (HikariCP).
-    # HikariCP loggt den echten Verbindungsfehler (statt Flyway's null-Connection-Bug).
 
   jpa:
     show-sql: false

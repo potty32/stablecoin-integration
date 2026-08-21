@@ -3,6 +3,7 @@ package de.atruvia.stablecoin.config;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.flyway.FlywayDataSource;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
 import javax.sql.DataSource;
 
@@ -59,6 +61,26 @@ public class TenantDataSourceConfig {
             @Value("${spring.flyway.password:${spring.datasource.password}}") String password) {
         return DataSourceBuilder.create()
                 .url(url).username(user).password(password).build();
+    }
+
+    /**
+     * Flyway-DataSource mit SimpleDriverDataSource (kein HikariCP-Pool, kein initializationFailTimeout).
+     * Umgeht FlywayAutoConfiguration.getMigrationDataSource() → kein DataSourceBuilder.deriveFrom()-Problem.
+     * SimpleDriverDataSource öffnet direkte JDBC-Verbindungen via DriverManager — für Flyway ausreichend.
+     */
+    @Bean
+    @FlywayDataSource
+    public DataSource flywayDataSource(
+            @Value("${spring.flyway.url}") String url,
+            @Value("${spring.flyway.user}") String user,
+            @Value("${spring.flyway.password}") String password) {
+        return DataSourceBuilder.create()
+                .type(SimpleDriverDataSource.class)
+                .url(url)
+                .username(user)
+                .password(password)
+                .driverClassName("org.postgresql.Driver")
+                .build();
     }
 
     @Bean("adminJdbcTemplate")
