@@ -32,8 +32,11 @@ server:
 
 logging:
   level:
-    root: WARN
-    de.atruvia.stablecoin: INFO
+    root: INFO
+    com.zaxxer.hikari: DEBUG
+    org.flywaydb: DEBUG
+    org.springframework.orm.jpa: DEBUG
+    org.hibernate.engine.jdbc.env: DEBUG
 
 app:
   security:
