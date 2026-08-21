@@ -36,5 +36,10 @@ ALTER TABLE dvp_escrow ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_policy ON dvp_escrow
     USING (tenant_id = current_setting('app.current_tenant', true));
 
--- App-User-Grants
-GRANT SELECT, INSERT, UPDATE ON dvp_escrow TO stablecoin_app;
+-- App-User-Grants (nur wenn stablecoin_app-Role existiert — Railway-kompatibel)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stablecoin_app') THEN
+        GRANT SELECT, INSERT, UPDATE ON dvp_escrow TO stablecoin_app;
+    END IF;
+END $$;

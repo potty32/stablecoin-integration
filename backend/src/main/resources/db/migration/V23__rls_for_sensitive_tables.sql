@@ -34,11 +34,16 @@ ALTER TABLE phone_alias ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_policy ON phone_alias
     USING (tenant_id = current_setting('app.current_tenant', true));
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON phone_alias TO stablecoin_app;
+-- Grants nur wenn stablecoin_app-Role existiert (Railway-kompatibel)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stablecoin_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON phone_alias TO stablecoin_app;
+  END IF;
+END $$;
 
 -- ── approval_workflow: GRANT-Nachpflege ──────────────────────────────────────
 DO $$ BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stablecoin_app') AND NOT EXISTS (
     SELECT 1 FROM information_schema.role_table_grants
     WHERE grantee = 'stablecoin_app' AND table_name = 'approval_workflow' AND privilege_type = 'SELECT'
   ) THEN
@@ -48,7 +53,7 @@ END $$;
 
 -- ── rate_quote: GRANT-Nachpflege ──────────────────────────────────────────────
 DO $$ BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stablecoin_app') AND NOT EXISTS (
     SELECT 1 FROM information_schema.role_table_grants
     WHERE grantee = 'stablecoin_app' AND table_name = 'rate_quote' AND privilege_type = 'SELECT'
   ) THEN

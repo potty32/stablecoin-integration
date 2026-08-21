@@ -19,11 +19,18 @@ INSERT INTO tenant (id, name, type, rls_active) VALUES
     ('tenant-default',   'Default Dev Tenant',       'DEV',         true);
 
 -- ============================================================
--- 2. App-User Grants (stablecoin_app muss vorab existieren)
+-- 2. App-User Grants (nur wenn stablecoin_app-Role existiert)
+--    Auf Railway gibt es nur einen DB-User → Grants werden übersprungen,
+--    Table-Owner bypassed RLS ohnehin automatisch.
 -- ============================================================
-GRANT USAGE ON SCHEMA public TO stablecoin_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO stablecoin_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO stablecoin_app;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stablecoin_app') THEN
+        GRANT USAGE ON SCHEMA public TO stablecoin_app;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO stablecoin_app;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO stablecoin_app;
+    END IF;
+END $$;
 
 -- ============================================================
 -- 3. tenant_id-Spalten (nullable -> backfill -> NOT NULL)

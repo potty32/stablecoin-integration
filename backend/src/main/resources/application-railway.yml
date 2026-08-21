@@ -3,17 +3,25 @@ spring:
     activate:
       on-profile: railway
 
-  # Railway's DATABASE_URL = postgresql://... (kein jdbc:-Prefix) → wir ergänzen ihn
+  # Railway stellt DATABASE_URL als postgresql://user:pass@host:port/db bereit.
+  # jdbc:-Prefix wird ergänzt damit der PostgreSQL-JDBC-Treiber die URL erkennt.
   datasource:
     url: "jdbc:${DATABASE_URL}"
+    username: ${PGUSER}
+    password: ${PGPASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
       minimum-idle: 1
       connection-timeout: 10000
 
+  # TenantDataSourceConfig.adminDataSource liest spring.flyway.url/user/password
+  # via @Value — auf Railway identisch mit der App-DataSource (Railway hat einen User,
+  # der automatisch Table-Owner ist und RLS bypassed).
   flyway:
-    # Erbt DataSource von oben — keine eigene URL nötig, vermeidet doppelte Konfiguration
+    url: "jdbc:${DATABASE_URL}"
+    user: ${PGUSER}
+    password: ${PGPASSWORD}
     schemas: public
 
   jpa:

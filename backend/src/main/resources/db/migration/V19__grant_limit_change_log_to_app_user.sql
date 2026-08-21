@@ -2,4 +2,9 @@
 -- V8 greift nur auf Tabellen zu, die zum Migrationszeitpunkt existieren.
 -- Tabellen aus V10+ müssen explizit nachgepflegt werden.
 
-GRANT SELECT, INSERT, UPDATE ON limit_change_log TO stablecoin_app;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stablecoin_app') THEN
+        GRANT SELECT, INSERT, UPDATE ON limit_change_log TO stablecoin_app;
+    END IF;
+END $$;
