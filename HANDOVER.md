@@ -1,8 +1,8 @@
 # Handover-Dokument — Atruvia Stablecoin Integration Platform
 
-> Letzte Aktualisierung: **2026-08-20** (docs: Repository-Audit, Dev-Portal-Vollständigkeitsprüfung, ToDo.md konsolidiert) | GitHub: https://github.com/potty32/stablecoin-integration
-> **Commits 2026-08-20:** Phase 1+2 Audit-Fixes · Multi-Token-Adapter + DvP · Copilot Chatbot · V24 Dev-Portal-Seed · Docs-Cleanup
-> **Tests:** 238 | **238 bestanden** | 0 Fehler | **Flyway:** V1–V24 | **Frontend:** Angular 18 + Dev-Portal + Copilot
+> Letzte Aktualisierung: **2026-08-21** (Railway-Deployment vollständig, UC1 verifiziert) | GitHub: https://github.com/potty32/stablecoin-integration
+> **Commits 2026-08-21:** Railway-Deployment · Tenant-aware Queries · Flyway V25–V29 · Address-Book-Seed
+> **Tests:** 238 | **238 bestanden** | 0 Fehler | **Flyway:** V1–V29 | **Railway:** ✅ Live unter https://stablecoin-integration-production.up.railway.app
 
 ---
 
@@ -618,3 +618,65 @@ Seed-Accounts (V1+V2 Migrationen) haben `tenant_id = 'tenant-default'`. Für Iso
 - Railway Deploy: Prod-Secrets (Circle/Taurus/Chainalysis API-Keys) eintragen
 - mTLS: `SSL_KEYSTORE_PATH` für Railway bereitstellen
 - OWASP CI: `NVD_API_KEY` als GitHub Secret (Settings → Secrets → Actions)
+
+
+---
+
+## Railway Deployment (Live seit 2026-08-21)
+
+**URL:** https://stablecoin-integration-production.up.railway.app  
+**Projekt:** `dynamic-upliftment` | Railway CLI: `railway link` → Projekt wählen  
+**Health:** `GET /actuator/health` → `{"status":"UP"}`
+
+### Pflicht-Variablen (Railway Dashboard → App-Service → Variables)
+
+| Variable | Wert |
+|---|---|
+| `SPRING_PROFILES_ACTIVE` | `dev,railway` |
+| `JWT_SECRET` | min. 32 Zeichen |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `PGHOST` | `${{Postgres.PGHOST}}` |
+| `PGPORT` | `${{Postgres.PGPORT}}` |
+| `PGDATABASE` | `${{Postgres.PGDATABASE}}` |
+| `PGUSER` | `${{Postgres.PGUSER}}` |
+| `PGPASSWORD` | `${{Postgres.PGPASSWORD}}` |
+| `SPRING_DATASOURCE_HIKARI_INITIALIZATION_FAIL_TIMEOUT` | `60000` |
+| `APP_RATE_LIMIT_SMALL_VB_PER_MINUTE` | `600` |
+| `APP_RATE_LIMIT_LARGE_VB_PER_MINUTE` | `600` |
+| `APP_RATE_LIMIT_ANON_PER_SECOND` | `30` |
+
+### Wichtige Architektur-Entscheidungen für Railway
+
+1. **`SPRING_PROFILES_ACTIVE=dev,railway`** — `railway`-Profil überschreibt dev-Settings (DB-URL),
+   `dev`-Profil liefert Mock-Beans (CircleWalletClient, TaurusCustodyClient etc.)
+2. **Kein RLS** auf Railway — DB-Owner bypassed RLS → `findByCustomerIdAndTenantId()` kompensiert
+3. **JDBC-URL ohne Credentials** — PostgreSQL JDBC 42.7.x Bug: `user:pass@host` wird als Hostname geparst
+   → URL = `jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}`, Credentials separat
+4. **`@FlywayDataSource` mit `SimpleDriverDataSource`** — umgeht Flyway 10.x Bug (null-Connection bei
+   `initializationFailTimeout=0` + HikariCP-Pool)
+5. **Flyway V25–V29** sind Railway-spezifische Fixes (Seed-Daten, Duplicate-IDs, tenant-aware)
+
+### Wiederverbinden (neuer Rechner)
+
+```bash
+# 1. Repo klonen
+git clone https://github.com/potty32/stablecoin-integration.git
+cd stablecoin-integration
+
+# 2. Git-Credentials setzen (GitHub Token mit repo-Scope)
+git remote set-url origin https://potty32:<TOKEN>@github.com/potty32/stablecoin-integration.git
+
+# 3. Railway CLI (für Log-Zugriff)
+npm install -g @railway/cli
+railway login --browserless   # Link im Browser bestätigen
+railway link                  # Projekt: dynamic-upliftment, Service: stablecoin-integration
+
+# 4. Lokal starten (dev-Modus)
+# PostgreSQL anlegen: stablecoin/stablecoin_dev_pass + stablecoin_app/stablecoin_app_pass
+# Dann:
+cd backend && mvn package -DskipTests && \
+  SPRING_PROFILES_ACTIVE=dev java -jar target/stablecoin-backend-1.0.0.jar
+cd frontend && npm install && node_modules/.bin/ng serve --proxy-config proxy.conf.json
+# → http://localhost:4200
+```
+
