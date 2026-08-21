@@ -3,6 +3,7 @@ package de.atruvia.stablecoin.config;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.flyway.FlywayDataSource;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
 import javax.sql.DataSource;
 
@@ -59,6 +61,27 @@ public class TenantDataSourceConfig {
             @Value("${spring.flyway.password}") String password) {
         return DataSourceBuilder.create()
                 .url(url).username(user).password(password).build();
+    }
+
+    /**
+     * Expliziter DataSource für Flyway-Migrationen — umgeht FlywayAutoConfiguration.getMigrationDataSource(),
+     * das intern DataSourceBuilder.deriveFrom(primaryDataSource) aufruft. TenantAwareDataSource ist ein
+     * DelegatingDataSource-Wrapper, aus dem Spring keine driverClassName extrahieren kann → null-Connection.
+     * SimpleDriverDataSource: kein Pool, direktes JDBC — ausreichend für Migrations-Lauf.
+     */
+    @Bean
+    @FlywayDataSource
+    public DataSource flywayDataSource(
+            @Value("${spring.flyway.url}") String url,
+            @Value("${spring.flyway.user}") String user,
+            @Value("${spring.flyway.password}") String password) {
+        return DataSourceBuilder.create()
+                .type(SimpleDriverDataSource.class)
+                .url(url)
+                .username(user)
+                .password(password)
+                .driverClassName("org.postgresql.Driver")
+                .build();
     }
 
     @Bean("adminJdbcTemplate")
