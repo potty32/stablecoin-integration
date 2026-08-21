@@ -22,6 +22,7 @@ spring:
     url: "jdbc:${DATABASE_URL}"
     user: ${PGUSER}
     password: ${PGPASSWORD}
+    driver-class-name: org.postgresql.Driver
     schemas: public
 
   jpa:
