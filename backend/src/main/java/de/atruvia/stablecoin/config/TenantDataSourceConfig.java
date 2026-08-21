@@ -3,7 +3,6 @@ package de.atruvia.stablecoin.config;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.flyway.FlywayDataSource;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
@@ -11,7 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
 import javax.sql.DataSource;
 
@@ -20,10 +18,11 @@ import javax.sql.DataSource;
  * Der Proxy setzt app.current_tenant auf jeder Connection bei Pool-Entnahme.
  *
  * Zwei Datasources:
- *  - hikariBaseDataSource: roher HikariCP-Pool (stablecoin_app, RLS-User)
- *  - dataSource (Primary): Tenant-Proxy-Wrapper → von JPA / Hibernate genutzt
+ *  - hikariBaseDataSource: roher HikariCP-Pool
+ *  - dataSource (Primary): Tenant-Proxy-Wrapper → von JPA und Flyway genutzt
  *
- * Flyway nutzt spring.flyway.url/user/password unabhängig (stablecoin, BYPASSRLS).
+ * Railway: nur ein DB-User → adminDataSource nutzt dieselben Credentials wie datasource.
+ * Dev: spring.flyway.user/password können abweichen (Owner-User für BYPASSRLS).
  */
 @Configuration
 public class TenantDataSourceConfig {
@@ -50,38 +49,16 @@ public class TenantDataSourceConfig {
     }
 
     /**
-     * Admin-DataSource: stablecoin-User (BYPASSRLS) für Cross-Tenant-Lookups.
-     * Wird im Inbound-Webhook-Processing für den initialen Wallet-Address-Lookup
-     * genutzt, bevor der Tenant-Kontext bekannt ist.
+     * Admin-DataSource für Cross-Tenant-Lookups (OutboxProcessor, Inbound-Webhook).
+     * Fallback auf spring.datasource.* wenn spring.flyway.* nicht gesetzt (Railway).
      */
     @Bean("adminDataSource")
     public DataSource adminDataSource(
-            @Value("${spring.flyway.url}") String url,
-            @Value("${spring.flyway.user}") String user,
-            @Value("${spring.flyway.password}") String password) {
+            @Value("${spring.flyway.url:${spring.datasource.url}}") String url,
+            @Value("${spring.flyway.user:${spring.datasource.username}}") String user,
+            @Value("${spring.flyway.password:${spring.datasource.password}}") String password) {
         return DataSourceBuilder.create()
                 .url(url).username(user).password(password).build();
-    }
-
-    /**
-     * Expliziter DataSource für Flyway-Migrationen — umgeht FlywayAutoConfiguration.getMigrationDataSource(),
-     * das intern DataSourceBuilder.deriveFrom(primaryDataSource) aufruft. TenantAwareDataSource ist ein
-     * DelegatingDataSource-Wrapper, aus dem Spring keine driverClassName extrahieren kann → null-Connection.
-     * SimpleDriverDataSource: kein Pool, direktes JDBC — ausreichend für Migrations-Lauf.
-     */
-    @Bean
-    @FlywayDataSource
-    public DataSource flywayDataSource(
-            @Value("${spring.flyway.url}") String url,
-            @Value("${spring.flyway.user}") String user,
-            @Value("${spring.flyway.password}") String password) {
-        return DataSourceBuilder.create()
-                .type(SimpleDriverDataSource.class)
-                .url(url)
-                .username(user)
-                .password(password)
-                .driverClassName("org.postgresql.Driver")
-                .build();
     }
 
     @Bean("adminJdbcTemplate")

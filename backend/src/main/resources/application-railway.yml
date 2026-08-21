@@ -16,15 +16,9 @@ spring:
       connection-timeout: 10000
 
   flyway:
-    url: "jdbc:${DATABASE_URL}"
-    user: ${PGUSER}
-    password: ${PGPASSWORD}
-    driver-class-name: org.postgresql.Driver
     schemas: public
-    # connect-retries > 0: verhindert Flyway-Bug der SQLException still schluckt
-    # und null zurückgibt — mit Retries wird der echte DB-Fehler sichtbar
-    connect-retries: 5
-    connect-retries-interval: 3
+    # Kein spring.flyway.url → Flyway nutzt die primäre DataSource (HikariCP).
+    # HikariCP loggt den echten Verbindungsfehler (statt Flyway's null-Connection-Bug).
 
   jpa:
     show-sql: false
